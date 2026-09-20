@@ -1,0 +1,23 @@
+{
+  "response": {
+    "funds": {
+      "dataList": [
+        {
+          "id": 16,
+          "currency": {
+            "id": 1,
+            "symbol": "EGP"
+          },
+          "slug": "az-gold-2",
+          "last_nav": {
+            "id": 11772363,
+            "nav": 24.1079,
+            "date": "2026-09-17",
+            "fund_id": 16,
+            "teacomputer_id": 251
+          }
+        }
+      ]
+    }
+  }
+}

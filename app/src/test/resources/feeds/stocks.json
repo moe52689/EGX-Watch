@@ -1,0 +1,16 @@
+{
+  "stocks": [
+    {
+      "Symbol": "BINV",
+      "StockName": "B Investments Holding SAE",
+      "LastPrice": 62.25,
+      "CreatedAt": "2026-09-20T09:06:44.63Z"
+    },
+    {
+      "Symbol": "CCAP",
+      "StockName": "Qalaa Holdings SAE",
+      "LastPrice": 6.89,
+      "CreatedAt": "2026-09-20T09:06:44.728Z"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+.tools/
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+artifacts/
+*.keystore
+*.jks
+.env
+__pycache__/
