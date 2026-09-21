@@ -12,10 +12,18 @@ class UiSmokeTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
     @Test fun mainNavigationAndInstrumentValidationAreVisible() {
         rule.onNodeWithText("EGX Watch").assertIsDisplayed()
+        rule.onNodeWithText("0 instruments").assertIsDisplayed()
         rule.onNodeWithText("Discover").performClick()
         rule.onNodeWithText("Ticker or full name").performTextInput("CCAP")
-        rule.waitUntil(5000) { rule.onAllNodesWithText("Validate & add").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Ticker or full name").performImeAction()
+        rule.waitUntil(10000) { rule.onAllNodesWithText("1 results", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithTag("discoverList").performScrollToNode(hasText("Validate & add"))
         rule.onNodeWithText("Qalaa for Financial Investments").assertIsDisplayed()
+        rule.onNodeWithText("Validate & add").performClick()
+        rule.waitUntil(10000) { rule.onAllNodesWithText("Added").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Added").assertIsNotEnabled()
+        rule.onNodeWithText("Watchlist").performClick()
+        rule.onNodeWithText("1 instruments").assertIsDisplayed()
         rule.onNodeWithText("History").performClick()
         rule.onNodeWithText("Your notification history").assertIsDisplayed()
         rule.onNodeWithText("Settings").performClick()

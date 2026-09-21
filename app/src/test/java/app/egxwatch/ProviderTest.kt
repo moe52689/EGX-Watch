@@ -43,6 +43,13 @@ class ProviderTest {
             assertEquals(expected, q.value.toPlainString()); assertEquals(DataKind.NAV, q.kind)
         }
     }
+    @Test fun issuerSlugRevisionKeepsStableFundIdentity() {
+        val revised = resource("azimut.json").replace("az-gold-2", "az-gold-1")
+        assertEquals("24.1079", FreePublicProvider.parseAzimut(instrument("AZG"), revised).value.toPlainString())
+        assertThrows(IllegalArgumentException::class.java) {
+            FreePublicProvider.parseAzimut(instrument("AZG"), revised.replace("az-gold-1", "different-fund-1"))
+        }
+    }
     @Test fun htmlDriftAndCurrencyChangesFailClosed() {
         assertThrows(IllegalArgumentException::class.java) { FreePublicProvider.parseSnduk(instrument("T70"), "<html>Unavailable</html>") }
         assertThrows(IllegalArgumentException::class.java) { FreePublicProvider.parseSnduk(instrument("T70"), resource("snduk.html").replace("EGP", "USD")) }

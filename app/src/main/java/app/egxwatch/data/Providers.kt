@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 /** Offline identity directory only. It contains no prices and makes no live-validation claim. */
 class DirectoryProvider : MarketDataProvider {
     companion object {
-        val instruments = listOf(
+        val referenceInstruments = listOf(
             Instrument("EGX:CCAP", "CCAP", "Qalaa for Financial Investments", InstrumentType.STOCK,
                 source = "https://www.arabfinance.com/en/Home/CompanyProfile/CCAP", verifiedAt = "2026-09-20"),
             Instrument("EGX:BINV", "BINV", "B Investments Holding", InstrumentType.STOCK,
@@ -30,6 +30,7 @@ class DirectoryProvider : MarketDataProvider {
             Instrument("EGX:EGX30ETF", "EGX30ETF", "EGX 30 Index ETF", InstrumentType.ETF,
                 source = "https://www.egx30etf.com/", verifiedAt = "2026-09-20")
         )
+        val instruments: List<Instrument> by lazy { (referenceInstruments + InstrumentCatalog.bundled).distinctBy { it.id }.sortedBy { it.ticker } }
     }
     override suspend fun search(query: String) = instruments.filter {
         it.ticker.contains(query.trim(), true) || it.name.contains(query.trim(), true)
@@ -90,7 +91,7 @@ class GatewayProvider(baseUrl: String) : MarketDataProvider {
             val result = Instrument(json.getString("id"), json.getString("ticker"), json.getString("name"),
                 InstrumentType.valueOf(json.getString("type")), json.getString("currency"),
                 json.getString("source"), json.getString("verifiedAt"))
-            require(result.id.isNotBlank() && result.id.length <= 160 && result.ticker.isNotBlank() && result.ticker.length <= 30)
+            require(result.id.isNotBlank() && result.id.length <= 160 && result.ticker.isNotBlank() && result.ticker.length <= 160)
             require(result.name.isNotBlank() && result.name.length <= 200 && result.source.isNotBlank())
             require(result.currency.matches(Regex("[A-Z]{3}")))
             java.time.LocalDate.parse(result.verifiedAt)

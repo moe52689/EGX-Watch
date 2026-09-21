@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
@@ -22,6 +24,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -116,7 +121,7 @@ fun WatchApp(openHistory: Boolean = false, vm: WatchViewModel = viewModel()) {
                         }
                         item { MarketCard(market) }
                         if (settings.providerUrl.isBlank()) item {
-                            if (settings.freeFeeds) InfoCard("Free public feeds", "CCAP & BINV: indicative snapshots, delay unknown. AZG, T70, CTQ & BFA: dated fund NAVs. Tap refresh to check.")
+                            if (settings.freeFeeds) InfoCard("Free public feeds", "Browse stocks and funds in Discover. Stock snapshots are indicative; fund NAVs retain their valuation dates. Latest saved values remain visible if a refresh fails.")
                             else InfoCard("Start with a data connection", "Connect a provider or enable free public feeds in Settings.", "Set up provider") { tab = 3 }
                         }
                         item {
@@ -202,11 +207,12 @@ fun WatchApp(openHistory: Boolean = false, vm: WatchViewModel = viewModel()) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(row.ticker, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(row.ticker, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(row.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                 }
                 SmallTag(row.type)
             }
+            if (row.value != null) Text("Latest saved ${if (row.type == "FUND") "NAV" else "value"}", style = MaterialTheme.typography.labelSmall)
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(row.value?.let { "$it ${row.currency}" } ?: "—", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
                 Text(dataLabel(row), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -214,31 +220,54 @@ fun WatchApp(openHistory: Boolean = false, vm: WatchViewModel = viewModel()) {
             Text(row.timestamp?.let { dataTime(it, row.timestampBasis) } ?: "No verified ${if (row.type == "FUND") "NAV" else "quote"} yet", style = MaterialTheme.typography.bodySmall)
             if (row.timestamp != null && Duration.between(Instant.parse(row.timestamp), Instant.now()).toHours() > 24)
                 Text("Older observation · not a current quote", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
-            if (row.error != null) Text(row.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            if (row.error != null) Text((if (row.value != null) "Refresh unavailable · showing latest saved value\n" else "") + row.error,
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
     }
 }
 @Composable private fun SearchScreen(vm: WatchViewModel, list: Watchlist?, newList: () -> Unit) {
+    val keyboard = LocalSoftwareKeyboardController.current
     var query by rememberSaveable { mutableStateOf("") }
     val results by vm.results.collectAsStateWithLifecycle()
     val searching by vm.searching.collectAsStateWithLifecycle()
+    val directoryStatus by vm.directoryStatus.collectAsStateWithLifecycle()
+    val refreshing by vm.refreshingDirectory.collectAsStateWithLifecycle()
+    val tracked by vm.instruments.collectAsStateWithLifecycle()
+    var type by rememberSaveable { mutableStateOf("All") }
+    val visible = results.filter { type == "All" || it.type.name == type }
     LaunchedEffect(query) { vm.search(query) }
-    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(Modifier.testTag("discoverList"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Text("Discover your next watch", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("Stocks, ETFs & investment funds", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("Ticker or full name") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
             leadingIcon = { Icon(Icons.Outlined.Search, null) }) }
+        item {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("All", "STOCK", "FUND", "ETF").forEach { option ->
+                    FilterChip(selected = type == option, onClick = { type = option }, label = { Text(option) })
+                }
+            }
+            Text(directoryStatus, style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { vm.refreshDirectory() }, enabled = !refreshing) { Text(if (refreshing) "Refreshing directory…" else "Refresh directory") }
+            Text("${visible.size} results · Price coverage varies by source", style = MaterialTheme.typography.labelSmall)
+        }
         item { Text(if (list == null) "Create a watchlist to add instruments." else "Adding to ${list.name}", style = MaterialTheme.typography.bodySmall)
             if (list == null) TextButton(onClick = newList) { Text("Create watchlist") }
             if (searching) LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (!searching && results.isEmpty()) item { InfoCard("No matching instruments", "Check the ticker or connect a provider with broader coverage. Unrecognized symbols cannot be added.") }
-        items(results, key = { it.id }) { instrument ->
+        if (!searching && visible.isEmpty()) item { InfoCard("No matching instruments", "Check the ticker or connect a provider with broader coverage. Unrecognized symbols cannot be added.") }
+        items(visible, key = { it.id }) { instrument ->
+            val added = tracked.any { it.listId == list?.id && it.id == instrument.id }
             OutlinedCard { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(instrument.ticker, fontWeight = FontWeight.Bold); SmallTag(instrument.type.name) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(instrument.ticker, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
+                    SmallTag(instrument.type.name)
+                }
+                if (instrument.id.startsWith("SNDUK:")) Text("Fund provider code", style = MaterialTheme.typography.labelSmall)
                 Text(instrument.name, style = MaterialTheme.typography.titleMedium)
                 Text("${instrument.currency} · Directory verified ${instrument.verifiedAt}", style = MaterialTheme.typography.bodySmall)
                 Text(instrument.source, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = { list?.let { vm.add(it.id, instrument) } }, enabled = list != null) { Text("Validate & add") }
+                Button(onClick = { list?.let { vm.add(it.id, instrument) } }, enabled = list != null && !added) { Text(if (added) "Added" else "Validate & add") }
             } }
         }
     }
@@ -270,6 +299,8 @@ fun WatchApp(openHistory: Boolean = false, vm: WatchViewModel = viewModel()) {
     var draft by remember(settings) { mutableStateOf(settings) }
     var interval by remember(settings) { mutableStateOf(settings.interval.toString()) }
     var validation by remember { mutableStateOf<String?>(null) }
+    val connectionReport by vm.connectionReport.collectAsStateWithLifecycle()
+    val testingConnection by vm.testingConnection.collectAsStateWithLifecycle()
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         vm.message.value = if (it) "Notifications allowed" else "Notifications blocked; alert history still records events"
     }
@@ -281,7 +312,8 @@ fun WatchApp(openHistory: Boolean = false, vm: WatchViewModel = viewModel()) {
             Text("Public feeds may change or be delayed. Exchange timing is unverified for indicative prices. API keys belong on your gateway server.", style = MaterialTheme.typography.bodySmall) }
         item { OutlinedTextField(draft.providerUrl, { draft = draft.copy(providerUrl = it.trim()) }, Modifier.fillMaxWidth(),
             label = { Text("Provider base URL") }, placeholder = { Text("https://your-server.example/v1/") }, singleLine = true)
-            TextButton(onClick = { vm.testConnection(draft.providerUrl, draft.freeFeeds) }) { Text("Test connection") } }
+            TextButton(onClick = { vm.testConnection(draft.providerUrl, draft.freeFeeds) }, enabled = !testingConnection) { Text(if (testingConnection) "Testing feeds…" else "Test connection") } }
+        connectionReport?.let { report -> item { InfoCard("Feed diagnostics", report) } }
         item { HorizontalDivider(); Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { Text("Background monitoring", style = MaterialTheme.typography.titleMedium); Text("Android may delay checks to save battery.", style = MaterialTheme.typography.bodySmall) }
             Switch(draft.enabled, { draft = draft.copy(enabled = it) })

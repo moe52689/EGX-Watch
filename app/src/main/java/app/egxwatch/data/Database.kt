@@ -18,7 +18,8 @@ data class TrackedInstrument(val listId: Long, val id: String, val ticker: Strin
     val timestamp: String? = null, val quoteSource: String? = null, val delayMinutes: Int? = null,
     val lastCheck: String? = null, val error: String? = null,
     val timestampBasis: String = "EXCHANGE",
-    val absoluteThreshold: String? = null, val percentThreshold: String? = null) {
+    val absoluteThreshold: String? = null, val percentThreshold: String? = null,
+    val baselineKey: String? = null) {
     fun instrument() = Instrument(id, ticker, name, InstrumentType.valueOf(type), currency, identitySource, verifiedAt)
     companion object {
         fun from(listId: Long, value: Instrument) = TrackedInstrument(listId, value.id, value.ticker, value.name,
@@ -62,8 +63,17 @@ interface WatchDao {
     @Query("UPDATE alerts SET delivery = :delivery WHERE id = :id") suspend fun delivery(id: Long, delivery: String)
     @Query("DELETE FROM alerts WHERE id NOT IN (SELECT id FROM alerts ORDER BY id DESC LIMIT 500)") suspend fun trimHistory()
     @Query("DELETE FROM alerts") suspend fun clearHistory()
-    @Query("UPDATE instruments SET value = NULL, previous = NULL, kind = NULL, timestamp = NULL, quoteSource = NULL, delayMinutes = NULL, lastCheck = NULL, error = NULL") suspend fun resetQuotes()
+    @Query("UPDATE instruments SET baselineKey = NULL, previous = NULL") suspend fun invalidateBaselines()
 }
 
-@Database(entities = [Watchlist::class, TrackedInstrument::class, Settings::class, Alert::class], version = 1, exportSchema = false)
-abstract class WatchDatabase : RoomDatabase() { abstract fun dao(): WatchDao }
+@Database(entities = [Watchlist::class, TrackedInstrument::class, Settings::class, Alert::class], version = 2, exportSchema = false)
+abstract class WatchDatabase : RoomDatabase() {
+    abstract fun dao(): WatchDao
+    companion object {
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE instruments ADD COLUMN baselineKey TEXT")
+            }
+        }
+    }
+}

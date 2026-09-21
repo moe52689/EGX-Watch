@@ -1,23 +1,35 @@
 # Verification
 
-The implementation was built locally with JDK 17, Gradle 8.13, Android SDK 35
+Version 1.1.0 was verified on 21 September 2026 with JDK 17, Gradle 8.13, Android SDK 35
 and Android Gradle Plugin 8.11.1.
 
 | Check | Result |
 |---|---|
 | Debug APK assembly | Passed |
-| JVM unit tests | 28 passed |
-| Android emulator tests (API 35, x86_64) | 8 passed |
+| JVM unit tests | 34 passed |
+| Android emulator tests (API 35, x86_64) | 12 passed, including opt-in live-source checks |
 | Android lint | No errors; dependency/target-version and tooling warnings remain |
 | APK signature verification | Passed, APK Signature Scheme v2 |
 | APK installation and launch | Passed on Android 15 emulator |
 | Public feeds | Retrieved actual fund NAVs and indicative stock snapshots in the installed app |
+| Version 1 → 2 Room migration | Existing watchlist, saved price, source date and settings retained |
+| Fresh-install watchlist and picker | Empty watchlist, browse/search, validated addition and disabled duplicate button passed |
+| Public response cache | Survives client restart; malformed/failed refresh retains original content and timestamp |
 
 Emulator tests exercise Room transactions and persistence, first-value baselines,
 changed/unchanged values, error retention, timestamp regressions, duplicate
 additions, duplicate instruments across lists, provider switching, per-instrument
-thresholds and Compose screen navigation. They exposed a name-resolution deadlock
-in the add-instrument path, which was corrected and covered by a regression test.
+thresholds, date-only NAV corrections, cached-feed alert suppression and Compose
+screen navigation. No preset instruments are inserted on new installations.
+
+The live Android check retrieved valid observations for CCAP, BINV, COMI, EGBE
+(USD), T70, CTQ, AZG, BFA and an additional fund. All three sources passed actual
+quote/NAV parsing. Directory refresh returned 296 stocks, 153 funds and one ETF
+(including the issuer reference entry). The separate stock response contained
+246 verified stock matches; remaining directory entries are not promised quotes.
+Testing detected Azimut's AZG slug revision from `az-gold-2` to `az-gold-1`; the
+adapter now checks stable fund ID 16, the gold slug family, NAV fund ID and currency.
+This regression is covered by a unit test.
 
 The public-feed parsers are tested against captured real excerpts, separate from
 production data. Live checks were made against the public sources documented in

@@ -7,10 +7,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 
-class WatchRepository(private val database: WatchDatabase, private val providerFactory: ((Settings) -> MarketDataProvider)? = null) {
+class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: java.io.File? = null,
+    private val providerFactory: ((Settings) -> MarketDataProvider)? = null) {
     val dao = database.dao()
     private val mutex = Mutex()
-    private val freeProvider = FreePublicProvider()
+    private val freeProvider = FreePublicProvider(PublicFeedClient(feedCacheDirectory))
     fun provider(settings: Settings): MarketDataProvider = when {
         providerFactory != null -> providerFactory.invoke(settings)
         settings.providerUrl.isNotBlank() -> GatewayProvider(settings.providerUrl)
@@ -21,8 +22,7 @@ class WatchRepository(private val database: WatchDatabase, private val providerF
         database.withTransaction {
             if (dao.getSettings() == null) {
                 dao.save(Settings())
-                val list = dao.insertList(Watchlist(name = "My EGX watchlist"))
-                DirectoryProvider.instruments.take(6).forEach { dao.add(TrackedInstrument.from(list, it)) }
+                dao.insertList(Watchlist(name = "My EGX watchlist"))
             }
         }
     }
@@ -39,19 +39,20 @@ class WatchRepository(private val database: WatchDatabase, private val providerF
         if (settings.providerUrl.isNotBlank()) GatewayProvider.validateBaseUrl(settings.providerUrl)
         database.withTransaction {
             val old = dao.getSettings()
-            if (old?.providerUrl != settings.providerUrl || old.freeFeeds != settings.freeFeeds) dao.resetQuotes()
+            if (old?.providerUrl != settings.providerUrl || old.freeFeeds != settings.freeFeeds) dao.invalidateBaselines()
             dao.save(settings)
         }
     }
     /** Serializes manual/background checks; records baseline and alert atomically. */
-    suspend fun check(background: Boolean, deliver: suspend (Alert) -> String): Int = mutex.withLock {
+    suspend fun check(background: Boolean, onlyIds: Set<String>? = null, deliver: suspend (Alert) -> String): Int = mutex.withLock {
         val settings = dao.getSettings() ?: Settings()
         val policy = settings.policy()
         if (background && (!settings.enabled || !policy.isActive(Instant.now()))) return@withLock 0
         val provider = provider(settings)
         var count = 0
         // One request/notification per instrument even when it belongs to several lists.
-        dao.getInstruments().groupBy { it.id }.values.forEach { tracked ->
+        val baselineKey = "${settings.providerUrl}|${settings.freeFeeds}"
+        dao.getInstruments().filter { onlyIds == null || it.id in onlyIds }.groupBy { it.id }.values.forEach { tracked ->
             val original = tracked.first()
             try {
                 val quote = provider.quote(original.instrument())
@@ -63,24 +64,27 @@ class WatchRepository(private val database: WatchDatabase, private val providerF
                         val current = dao.getInstrument(row.listId, row.id) ?: continue
                         val oldTime = current.timestamp?.let(Instant::parse)
                         require(oldTime == null || quote.timestamp >= oldTime) { "Provider returned older data; keeping last value" }
-                        require(oldTime != quote.timestamp || current.value?.toBigDecimal()?.compareTo(quote.value) == 0) {
+                        val sameSeries = current.baselineKey == baselineKey && current.kind == quote.kind.name &&
+                            current.quoteSource == quote.source && current.timestampBasis == quote.timestampBasis.name
+                        require(!sameSeries || quote.timestampBasis == TimestampBasis.VALUATION_DATE ||
+                            oldTime != quote.timestamp || current.value?.toBigDecimal()?.compareTo(quote.value) == 0) {
                             "Provider changed a value without updating its timestamp"
                         }
-                        val sameSeries = current.kind == quote.kind.name && current.quoteSource == quote.source
                         val previous = current.value?.takeIf { sameSeries }?.toBigDecimal()
                         val rule = policy.copy(absoluteThreshold = current.absoluteThreshold?.toBigDecimal() ?: policy.absoluteThreshold,
                             percentThreshold = current.percentThreshold?.toBigDecimal() ?: policy.percentThreshold)
-                        if (shouldNotify(quote.value, previous, rule)) {
+                        if (quote.notice == null && shouldNotify(quote.value, previous, rule)) {
                             val change = previous?.let { change(quote.value, it) }
                             pending += Alert(instrumentId = row.id, ticker = row.ticker, name = row.name,
                                 current = quote.value.display(), previous = previous?.display(), absolute = change?.absolute?.display(),
                                 percent = change?.percent?.display(), currency = quote.currency, kind = quote.kind.name,
                                 dataTimestamp = quote.timestamp.toString(), checkedAt = now, source = quote.source, timestampBasis = quote.timestampBasis.name)
                         }
-                        val advanced = oldTime == null || quote.timestamp > oldTime
-                        dao.update(current.copy(value = quote.value.display(), previous = if (advanced) previous?.display() else current.previous,
+                        val advanced = oldTime == null || quote.timestamp > oldTime || current.value?.toBigDecimal()?.compareTo(quote.value) != 0
+                        dao.update(current.copy(value = quote.value.display(), previous = if (!sameSeries || advanced) previous?.display() else current.previous,
                             kind = quote.kind.name, timestamp = quote.timestamp.toString(), quoteSource = quote.source,
-                            delayMinutes = quote.delayMinutes, lastCheck = now, error = null, timestampBasis = quote.timestampBasis.name))
+                            delayMinutes = quote.delayMinutes, lastCheck = now, error = quote.notice,
+                            timestampBasis = quote.timestampBasis.name, baselineKey = baselineKey))
                     }
                     pending.firstOrNull()?.let { event ->
                         val id = dao.insertAlert(event)
@@ -92,7 +96,7 @@ class WatchRepository(private val database: WatchDatabase, private val providerF
                     val delivery = try { deliver(alert) } catch (e: SecurityException) { "Blocked by Android permission" }
                     dao.delivery(alert.id, delivery)
                 }
-                count++
+                if (quote.notice == null) count++
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 database.withTransaction {

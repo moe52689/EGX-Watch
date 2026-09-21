@@ -31,7 +31,7 @@ full-name search across stocks, ETFs and funds. A result must have all fields be
 ```
 
 `type` is `STOCK`, `ETF` or `FUND`. `id` is your stable canonical ID (up to 160
-characters); `ticker` must be nonempty (up to 30), name up to 200, currency ISO-like
+characters); `ticker` must be nonempty (up to 160, to accommodate provider fund codes), name up to 200, currency ISO-like
 three-letter uppercase. `verifiedAt` is an ISO date. Keep separate share classes
 and currencies under separate IDs. There is no client-side six-symbol allowlist
 for a gateway. To reuse built-in watchlist entries, support these IDs:
@@ -74,7 +74,8 @@ exchange quotes; do not send an ETF indicative NAV as its traded price.
 
 The client rejects negative/oversized values, wrong identity/currency, missing
 source, future timestamps beyond 5 minutes, regressing timestamps, and a different
-value under an unchanged timestamp. Preserve decimals (up to 24 significant digits
+value under an unchanged exchange/snapshot timestamp. Date-only NAV corrections
+can update the same valuation date. Preserve decimals (up to 24 significant digits
 and 12 decimal places). Old observations remain visible with their actual date
 and an age warning after 24 hours. They are never re-dated to “now”.
 

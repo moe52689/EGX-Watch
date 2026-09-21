@@ -11,7 +11,7 @@ data class Instrument(val id: String, val ticker: String, val name: String, val 
     val currency: String = "EGP", val source: String, val verifiedAt: String)
 data class Quote(val instrumentId: String, val value: BigDecimal, val currency: String,
     val kind: DataKind, val timestamp: Instant, val source: String, val delayMinutes: Int? = null,
-    val timestampBasis: TimestampBasis = TimestampBasis.EXCHANGE)
+    val timestampBasis: TimestampBasis = TimestampBasis.EXCHANGE, val notice: String? = null)
 data class MarketStatus(val state: String, val detail: String, val timestamp: Instant?)
 
 interface MarketDataProvider {

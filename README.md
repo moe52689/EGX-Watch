@@ -13,8 +13,9 @@ then unzip the artifact. Build artifacts are intentionally not committed to Git.
 1. Copy the APK to your Android phone and open it.
 2. Allow “Install unknown apps” for the file manager/browser you use, if prompted.
 3. Install **EGX Watch**. This is a development-signed debug build.
-4. Open the app and tap **Check now** (refresh icon). Free public feeds are enabled
-   by default; background monitoring starts paused.
+4. Open **Discover**, search or browse, and add your chosen instruments. New installs
+   start with an **empty watchlist**. Adding an instrument fetches its latest published
+   value automatically. Free feeds are enabled; background monitoring starts paused.
 5. In **Settings**, allow notifications, choose monitoring days/times and interval,
    enable background monitoring, then tap **Save settings**.
 
@@ -33,9 +34,14 @@ watchlists and history. No provider credentials are needed for the free feeds.
 
 - Multiple named watchlists with validated additions and removal; stocks, ETFs and
   funds may be mixed in a single list. Each shows ticker, full name and type.
-- Initial watchlist: **CCAP, BINV, T70, CTQ, AZG, BFA**. Discover also includes
-  EGX30ETF. A custom gateway can return any validated instruments, not just these.
-- Public free feeds: indicative CCAP/BINV snapshots; dated AZG/T70/CTQ/BFA fund NAVs.
+- Empty initial watchlist, with searchable names/codes and stock/fund/ETF filters.
+  The bundled identity catalogue contains **296 stocks, 153 funds and one ETF**.
+  Refresh directory updates identities from public sources. Existing selections
+  survive upgrades. CCAP, BINV, T70, CTQ, AZG and BFA remain available to choose.
+- Public free feeds: broad indicative stock snapshots and published fund NAVs.
+  The checked stock response matched **246 of the 296 stock identities**; directory
+  membership does not guarantee a free price. Unsupported values show unavailable.
+  Funds without a verified short ticker display their provider code and full name.
   [Coverage, sources and limitations](docs/FREE_FEEDS.md) are explicit. No random,
   demo or hard-coded prices are used at runtime.
 - Separate **LIVE**, **DELAYED**, **INDICATIVE**, and **NAV** labels. Unknown
@@ -53,8 +59,13 @@ watchlists and history. No provider credentials are needed for the free feeds.
   this overrides thresholds. Initial values otherwise establish a quiet baseline.
   Percentage is N/A when the previous value is zero or unavailable.
 - Latest 500 alert records persist locally, including blocked-notification status.
-  Offline/provider errors retain the last real value and never generate a fake
-  change. Duplicate instruments across lists produce one notification per check.
+  Offline/provider errors retain the last real value, source and data timestamp,
+  including after restarts or changing providers. Validated public responses are
+  also cached on disk. Failed refreshes never generate movement/every-check alerts.
+  Duplicate instruments across lists produce one notification per check.
+- **Settings → Test connection** fetches and validates real observations from
+  each free source and shows individual diagnostics; it does not merely search
+  the local directory. Opening the app refreshes existing selections automatically.
 - Market status from a connected gateway; Unknown for free feeds because they do
   not verify the exchange calendar. No fabricated holiday/open-status claims.
 
@@ -67,7 +78,8 @@ monitoring windows and can generate alerts using the same rules.
 
 Enter a public HTTPS gateway base URL under Settings, test it, and save. A gateway
 takes priority over free feeds. To restore free feeds, clear the URL and enable
-the free-feeds switch. Switching sources resets baselines to avoid false changes.
+the free-feeds switch. Switching sources resets comparison baselines to avoid
+false changes while keeping the latest saved value visible.
 
 See the [provider contract](docs/PROVIDER_CONTRACT.md). All vendor credentials stay
 on your gateway server. The app rejects URLs containing embedded credentials or
@@ -92,6 +104,8 @@ Run Room/repository and Compose UI tests on a connected API 26+ device/emulator:
 
 ```sh
 ./gradlew connectedDebugAndroidTest
+# Optional real-source checks (requires internet; upstream availability can vary):
+./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.liveFeeds=true
 ```
 
 Unit tests cover monetary precision, inclusive thresholds, zero baselines,
@@ -102,8 +116,10 @@ old observations, provider changes, threshold overrides and navigation.
 
 Manual acceptance checklist:
 
-1. Refresh the initial six instruments on a network; verify source/date labels.
-2. Search CCAP and try adding it twice to one list; duplicate addition is rejected.
+1. On a fresh install, verify the watchlist is empty. Add CCAP, BINV, T70, CTQ,
+   AZG and BFA in Discover; verify values load automatically with source/date labels.
+2. Search COMI or a full company name, use type filters, and add to a list. Added
+   entries disable the add button; duplicate addition is also rejected by storage.
 3. Create a second watchlist and add an ETF/fund alongside a stock. Unknown symbols
    must show no matches; configure a gateway to validate symbols outside the free directory.
 4. Open details, set a positive threshold, save it, then return to the watchlist.
@@ -116,6 +132,13 @@ Manual acceptance checklist:
 8. Turn network access off and refresh. Existing values retain their timestamps;
    errors appear without zeroing values or producing movement alerts.
 9. Restart the app and switch light/dark themes; watchlists, rules and history persist.
+10. Run Test connection to inspect each source. Switch providers and confirm the
+    saved values remain visible. Upgrade a prior installation without uninstalling:
+    existing selections and observations must survive.
+
+To regenerate the bundled identity metadata, run `scripts/update-catalog.ps1`
+with internet access. It captures names, currencies and identities only; downloaded
+prices are never bundled into the app. Review the resulting metadata before committing.
 
 ## Structure
 

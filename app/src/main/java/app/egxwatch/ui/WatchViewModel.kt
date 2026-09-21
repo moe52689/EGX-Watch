@@ -21,13 +21,19 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     val message = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
     val searching = MutableStateFlow(false)
+    val directoryStatus = MutableStateFlow("Saved directory · choose what appears in your watchlist")
+    val refreshingDirectory = MutableStateFlow(false)
+    val connectionReport = MutableStateFlow<String?>(null)
+    val testingConnection = MutableStateFlow(false)
     val market = MutableStateFlow(MarketStatus("Unknown", "Exchange status has not been checked.", null))
     private var searchJob: Job? = null
-    init { run { repository.initialize(); refreshMarket() } }
+    private var currentQuery = ""
+    init { run { repository.initialize(); refreshMarket(); check(); refreshDirectory() } }
     private fun run(action: suspend () -> Unit) = viewModelScope.launch {
         try { action() } catch (e: CancellationException) { throw e } catch (e: Exception) { message.value = e.message ?: "Something went wrong" }
     }
     fun search(query: String) {
+        currentQuery = query
         searchJob?.cancel()
         searchJob = run {
             searching.value = true
@@ -36,7 +42,23 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             finally { searching.value = false }
         }
     }
-    fun add(list: Long, instrument: Instrument) = run { repository.add(list, instrument); message.value = "${instrument.ticker} added" }
+    fun add(list: Long, instrument: Instrument) = run {
+        repository.add(list, instrument)
+        message.value = "${instrument.ticker} added · fetching latest published value"
+        repository.check(false, setOf(instrument.id)) { app.notifier.send(it) }
+    }
+    fun refreshDirectory() {
+        if (refreshingDirectory.value) return
+        run {
+            refreshingDirectory.value = true
+            try {
+                val provider = repository.provider(repository.dao.getSettings() ?: Settings())
+                directoryStatus.value = if (provider is FreePublicProvider) provider.refreshDirectory()
+                    else "Search the configured provider by ticker or name"
+                search(currentQuery)
+            } finally { refreshingDirectory.value = false }
+        }
+    }
     fun remove(instrument: TrackedInstrument) = run { repository.dao.remove(instrument) }
     fun createList(name: String) = run {
         require(name.trim().length in 1..60) { "Use a name between 1 and 60 characters" }
@@ -48,12 +70,28 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         MonitorScheduler.apply(app, value)
         message.value = "Settings saved"
         refreshMarket()
+        refreshDirectory()
     }
     fun testConnection(url: String, freeFeeds: Boolean) = run {
-        val provider = repository.provider(Settings(providerUrl = url, freeFeeds = freeFeeds))
-        val resolved = provider.search("CCAP")
-        message.value = "Connected. ${resolved.size} search result(s) for CCAP."
-        market.value = provider.marketStatus()
+        if (testingConnection.value) return@run
+        testingConnection.value = true
+        connectionReport.value = "Fetching and validating actual prices and NAVs…"
+        try {
+            val provider = repository.provider(Settings(providerUrl = url, freeFeeds = freeFeeds))
+            connectionReport.value = when (provider) {
+                is FreePublicProvider -> provider.health()
+                is DirectoryProvider -> "Offline directory only. Enable free feeds or configure a gateway for values."
+                else -> {
+                    val instrument = provider.resolve(provider.search("CCAP").first().id)
+                    val quote = provider.quote(instrument)
+                    validateQuote(instrument, quote)
+                    "Connected · ${instrument.ticker} ${quote.value} ${quote.currency} · ${quote.kind} · ${quote.timestamp}"
+                }
+            }
+            market.value = provider.marketStatus()
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { connectionReport.value = "Connection failed: ${e.message}" }
+        finally { testingConnection.value = false }
     }
     fun check() {
         if (busy.value) return
