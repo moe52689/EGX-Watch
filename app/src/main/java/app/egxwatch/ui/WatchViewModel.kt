@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import app.egxwatch.WatchApplication
 import app.egxwatch.data.*
 import app.egxwatch.domain.*
+import app.egxwatch.monitor.GoldScheduler
 import app.egxwatch.monitor.MonitorScheduler
 import app.egxwatch.monitor.connectivity
 import kotlinx.coroutines.*
@@ -14,6 +15,50 @@ import kotlinx.coroutines.flow.*
 class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as WatchApplication
     private val repository = app.repository
+    val preferences=app.database.forwardDao().preferencesFlow().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),null)
+    fun beginCollection()=run { val old=app.database.forwardDao().preferences() ?: ForwardPreferences();app.database.forwardDao().save(old.copy(onboardingSeen=true)) }
+    fun offHours(value:Boolean)=run { val old=app.database.forwardDao().preferences() ?: ForwardPreferences();app.database.forwardDao().save(old.copy(egxOffHours=value)) }
+    val storageStats=app.database.observationDao().storageStats().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),HistoryStats(0,null,null))
+    fun storageBytes():Long { val file=app.getDatabasePath("egx-watch.db");return file.length()+java.io.File(file.path+"-wal").length()+java.io.File(file.path+"-shm").length() }
+    fun eraseHistory(id:String?)=run { StorageRepository(app.database).erase(id);message.value="Collected history deleted; analytics will rebuild from new observations" }
+    fun exportHistory(uri:android.net.Uri,password:CharArray)=run {
+        try { withContext(Dispatchers.IO) { app.contentResolver.openOutputStream(uri,"w")!!.use { StorageRepository(app.database).export(it,password) } };message.value="Encrypted market archive exported" }
+        catch(e:Exception) { runCatching { android.provider.DocumentsContract.deleteDocument(app.contentResolver,uri) };throw e }
+        finally { password.fill('\u0000') }
+    }
+    val centerAlerts=app.database.forwardDao().alerts().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
+    fun markRead(id:String)=run { app.database.forwardDao().read(id,true) }
+    fun dismissAlert(id:String)=run { app.database.forwardDao().dismiss(id) }
+    fun chartEvents(id:String)=app.database.forwardDao().chartEvents(id,0)
+    val goldRules=app.database.forwardDao().rulesFlow().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
+    fun addGoldRule(rule:GoldRule)=run { GoldAlertEngine.validate(rule);app.database.forwardDao().save(rule) }
+    fun deleteGoldRule(rule:GoldRule)=run { app.database.forwardDao().delete(rule) }
+    val goldConfig=app.database.forwardDao().goldConfigFlow().map { it ?: GoldConfig() }.stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),GoldConfig())
+    val goldStatus=app.database.forwardDao().goldStatusFlow().map { it ?: GoldStatus() }.stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),GoldStatus())
+    val goldBusy=MutableStateFlow(false)
+    fun checkGold(background:Boolean=false)=run { if(goldBusy.value) return@run;goldBusy.value=true
+        try { app.goldRepository.check(background) } finally { goldBusy.value=false } }
+    fun saveGold(value:GoldConfig)=run { value.validate();app.database.forwardDao().save(value);GoldScheduler.apply(app,value);message.value="Gold monitoring saved" }
+    val collections = app.database.observationDao().seriesFlow().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    fun latestObservation(id:String)=app.database.observationDao().latestFlow(id)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun points(id:String,range:LocalChartRange):Flow<List<ChartPoint>> = app.database.observationDao().seriesFlow()
+        .map { rows -> rows.firstOrNull { it.instrumentId==id } }.distinctUntilChanged().flatMapLatest { series ->
+            if(series==null) flowOf(emptyList()) else {
+                val end=maxOf(System.currentTimeMillis(),series.lastProviderTime)
+                val zone=java.time.ZoneId.of(if(id=="GLOBAL:XAUUSD") "America/New_York" else "Africa/Cairo")
+                val start=maxOf(range.start(java.time.Instant.ofEpochMilli(end),zone),series.startedAt-4*86400000L)
+                if(end-start>90L*86400000) app.database.observationDao().sessionChart(series.seriesKey,start,end).map { rows ->
+                    rows.chunked(maxOf(1,(rows.size+499)/500)).map { group -> group.last().let { ChartPoint(it.lastTime,it.close.toDouble(),group.maxOf { r->r.high.toDouble() },group.minOf { r->r.low.toDouble() },group.sumOf { r->r.samples }) } }
+                } else app.database.observationDao().chart(series.seriesKey,start,end,maxOf(60000L,(end-start)/500))
+            }
+        }.flowOn(Dispatchers.Default)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun sessionBars(id:String):Flow<List<ObservedSession>> = app.database.observationDao().seriesFlow().map { it.firstOrNull { s->s.instrumentId==id } }
+        .flatMapLatest { s->if(s==null) flowOf(emptyList()) else app.database.observationDao().sessionChart(s.seriesKey,0,Long.MAX_VALUE) }
+    fun volumePoints(id:String):Flow<List<ChartPoint>> = app.database.observationDao().seriesFlow().map { rows ->
+        rows.firstOrNull { it.instrumentId==id }?.let { s->app.database.observationDao().recent(s.seriesKey,96).reversed().mapNotNull { o->o.volume?.let { ChartPoint(o.providerTime,it.toDouble(),it.toDouble(),it.toDouble(),1) } } } ?: emptyList()
+    }.flowOn(Dispatchers.Default)
     val analyses = app.database.engineDao().analyses().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val opportunities = app.database.engineDao().events().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val engineConfig = app.database.engineDao().configFlow().map { it ?: EngineConfig() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), EngineConfig())
@@ -46,7 +91,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     val market = MutableStateFlow(MarketStatus("Unknown", "Exchange status has not been checked.", null))
     private var searchJob: Job? = null
     private var currentQuery = ""
-    init { run { repository.initialize(); autoCheck() } }
+    init { run { repository.initialize();if(app.database.forwardDao().preferences()==null) app.database.forwardDao().save(ForwardPreferences()); AlertCenter.importExisting(app.database,repository.dao.history().first(),app.database.engineDao().events().first());autoCheck() } }
     private fun run(action: suspend () -> Unit) = viewModelScope.launch {
         try { action() } catch (e: CancellationException) { throw e } catch (e: Exception) { message.value = e.message ?: "Something went wrong" }
     }

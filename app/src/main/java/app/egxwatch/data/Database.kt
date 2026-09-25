@@ -66,10 +66,12 @@ interface WatchDao {
     @Query("UPDATE instruments SET baselineKey = NULL, previous = NULL") suspend fun invalidateBaselines()
 }
 
-@Database(entities = [Watchlist::class, TrackedInstrument::class, Settings::class, Alert::class, EngineConfig::class, MarketSnapshot::class, HistoricalPrice::class, AnalysisResult::class, OpportunityEvent::class, ProviderHealth::class, EngineStatus::class, OpportunityAlertState::class], version = 3, exportSchema = false)
+@Database(entities = [Watchlist::class, TrackedInstrument::class, Settings::class, Alert::class, EngineConfig::class, MarketSnapshot::class, HistoricalPrice::class, AnalysisResult::class, OpportunityEvent::class, ProviderHealth::class, EngineStatus::class, OpportunityAlertState::class, MarketObservation::class, ObservedSession::class, CollectionSeries::class, GoldConfig::class, GoldStatus::class, ForwardPreferences::class, GoldRule::class, GoldRuleState::class, CenterAlert::class], version = 5, exportSchema = false)
 abstract class WatchDatabase : RoomDatabase() {
     abstract fun dao(): WatchDao
     abstract fun engineDao(): EngineDao
+    abstract fun observationDao(): ObservationDao
+    abstract fun forwardDao(): ForwardDao
     companion object {
         val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {

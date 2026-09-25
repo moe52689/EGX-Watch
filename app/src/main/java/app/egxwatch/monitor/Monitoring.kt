@@ -59,6 +59,7 @@ class MonitorWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         val app = applicationContext as WatchApplication
         app.repository.initialize()
         val count = app.repository.check(background = true) { app.notifier.send(it) }
+        ObservationRepository(app.database).compact()
         val settings = app.repository.dao.getSettings() ?: Settings()
         val errors = app.repository.dao.getInstruments().mapNotNull { it.error }
         if (count == 0 && runAttemptCount < 2 && settings.enabled && (app.database.engineDao().config() ?: EngineConfig()).calendar(settings).isOpen(java.time.Instant.now()) &&

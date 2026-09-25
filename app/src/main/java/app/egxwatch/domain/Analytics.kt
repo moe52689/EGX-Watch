@@ -39,7 +39,9 @@ object IndicatorEngine {
 enum class OpportunityState { NORMAL, WATCH, OPPORTUNITY, STRONG_OPPORTUNITY }
 data class StructuredAnalysis(val status: String, val score: Int? = null, val confidence: Double = 0.0,
     val components: Map<String, Int> = emptyMap(), val indicators: Map<String, Double> = emptyMap(),
-    val drivers: List<String> = emptyList(), val risks: List<String> = emptyList()) {
+    val drivers: List<String> = emptyList(), val risks: List<String> = emptyList(),
+    val maturity:String="INITIALIZING",val available:List<String> = emptyList(),val building:List<String> = emptyList(),
+    val observations:Long=0,val sessions:Int=0,val completeness:Double=0.0,val startedAt:Long?=null) {
     val state: OpportunityState get() = when { score == null || score < 60 -> OpportunityState.NORMAL; score < 75 -> OpportunityState.WATCH;
         score < 85 -> OpportunityState.OPPORTUNITY; else -> OpportunityState.STRONG_OPPORTUNITY }
 }

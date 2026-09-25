@@ -45,20 +45,21 @@ class EngineRepositoryTest {
             repo.saveEngine(EngineConfig(enabled=true,minimumScore=0,minimumConfidence=0.0,quietStart="00:00",quietEnd="00:00"))
             repo.add(db.dao().getLists().single().id,instrument)
             repo.check(false){"Test"}
-            assertEquals("READY",db.engineDao().analysis(instrument.id)!!.analysis().status)
-            assertEquals(1,historyCalls);assertEquals(1,deliveries)
-            repo.check(false){"Test"};assertEquals(1,historyCalls);assertEquals(1,deliveries)
+            assertEquals("BUILDING HISTORY",db.engineDao().analysis(instrument.id)!!.analysis().status)
+            assertEquals(0,historyCalls);assertEquals(0,deliveries)
+            repo.check(false){"Test"};assertEquals(0,historyCalls);assertEquals(0,deliveries)
             q=q.copy(timestamp=now.plusSeconds(1),fields=MarketFields(volume=1001))
-            repo.check(false){"Test"};assertEquals(1,deliveries)
+            repo.check(false){"Test"};assertEquals(0,deliveries)
             val retryAt=now.plusSeconds(3600).toEpochMilli()
             db.engineDao().health(ProviderHealth("test",2,retryAt,null,"HTTP 429"))
             // The next repository check prunes non-configured provider diagnostics, so verify before checking.
             db.close();db=open();assertEquals(retryAt,db.engineDao().health("test")!!.retryAt)
             repo=repository();repo.initialize();repo.check(false){"Test"}
-            assertEquals(1,historyCalls);assertEquals(1,deliveries)
-            assertEquals(1,db.engineDao().events().first().size)
+            assertEquals(0,historyCalls);assertEquals(0,deliveries)
+            assertEquals(0,db.engineDao().events().first().size)
             assertEquals("110",db.dao().getInstruments().single().value)
-            assertNotNull(db.engineDao().alertState(instrument.id))
+            assertNull(db.engineDao().alertState(instrument.id))
+            assertEquals(2L,db.observationDao().latestSeries(instrument.id)!!.observations)
         } finally { db.close();context.deleteDatabase(name) }
     }
     @Test fun offSessionNeverCallsProvider()=runBlocking {

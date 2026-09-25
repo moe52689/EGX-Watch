@@ -4,8 +4,8 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.*
 
-enum class InstrumentType { STOCK, ETF, FUND }
-enum class DataKind { LIVE, DELAYED, NAV, INDICATIVE }
+enum class InstrumentType { STOCK, ETF, FUND, COMMODITY }
+enum class DataKind { LIVE, DELAYED, NAV, INDICATIVE, SPOT }
 enum class TimestampBasis { EXCHANGE, VALUATION_DATE, PROVIDER_SNAPSHOT, RETRIEVAL_TIME }
 data class Instrument(val id: String, val ticker: String, val name: String, val type: InstrumentType,
     val currency: String = "EGP", val source: String, val verifiedAt: String)
@@ -57,6 +57,7 @@ fun shouldNotify(current: BigDecimal, previous: BigDecimal?, policy: MonitorPoli
         (policy.percentThreshold?.let { limit -> delta.percent?.abs()?.let { it >= limit } } == true)
 }
 fun validateQuote(instrument: Instrument, quote: Quote, now: Instant = Instant.now()) {
+    require(quote.kind != DataKind.SPOT || (instrument.type == InstrumentType.COMMODITY && quote.timestampBasis == TimestampBasis.PROVIDER_SNAPSHOT))
     quote.fields.validate()
     require(quote.instrumentId == instrument.id) { "Quote belongs to a different instrument" }
     require(quote.currency == instrument.currency) { "Quote currency changed" }
@@ -64,7 +65,7 @@ fun validateQuote(instrument: Instrument, quote: Quote, now: Instant = Instant.n
     require(quote.timestamp <= now.plusSeconds(300)) { "Quote timestamp is in the future" }
     require(quote.source.isNotBlank()) { "Missing data source" }
     require(if (instrument.type == InstrumentType.STOCK) quote.kind != DataKind.NAV else
-        instrument.type == InstrumentType.ETF || quote.kind == DataKind.NAV) { "Incorrect quote/NAV classification" }
+        instrument.type in setOf(InstrumentType.ETF, InstrumentType.COMMODITY) || quote.kind == DataKind.NAV) { "Incorrect quote/NAV classification" }
     require(quote.kind != DataKind.DELAYED || (quote.delayMinutes != null && quote.delayMinutes in 0..1440)) { "Missing or invalid delay" }
     require(quote.kind != DataKind.NAV || quote.timestampBasis in setOf(TimestampBasis.VALUATION_DATE, TimestampBasis.EXCHANGE)) { "NAV requires a valuation timestamp" }
     require(quote.kind != DataKind.INDICATIVE || quote.timestampBasis in setOf(TimestampBasis.PROVIDER_SNAPSHOT, TimestampBasis.RETRIEVAL_TIME))

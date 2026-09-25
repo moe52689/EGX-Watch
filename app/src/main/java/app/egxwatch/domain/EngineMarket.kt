@@ -22,7 +22,7 @@ fun Quote.freshness(now: Instant, maxAgeMinutes: Long = 20): Freshness {
     if (notice != null) return Freshness.STALE
     val allowance = if (kind == DataKind.NAV) 4 * 24 * 60L else maxAgeMinutes + (delayMinutes ?: 0)
     if (Duration.between(timestamp, now).toMinutes() > allowance) return Freshness.STALE
-    return if (kind == DataKind.LIVE) Freshness.LIVE else Freshness.DELAYED
+    return if (kind in setOf(DataKind.LIVE, DataKind.SPOT)) Freshness.LIVE else Freshness.DELAYED
 }
 fun Quote.fingerprint(): String {
     val parts = listOf(instrumentId, currency, kind.name, timestamp.toString(), source, timestampBasis.name,

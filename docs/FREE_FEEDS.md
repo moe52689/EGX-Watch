@@ -1,3 +1,7 @@
+# 1.4 update: separate documented gold source
+
+The EGX source policy below remains unchanged. Global XAU/USD can use the documented keyless Gold-API current-price endpoint: https://gold-api.com/docs and https://gold-api.com/terms (reviewed 2026-09-25). This is global spot USD/oz, not Egyptian retail gold or an EGX gold fund. No history endpoint or purchased historical data is used. API availability is not a guarantee of fresh prices or trading-session status.
+
 # Data-source permissions and coverage · 1.3.0
 
 The prior prototype used publicly accessible website endpoints. Public accessibility

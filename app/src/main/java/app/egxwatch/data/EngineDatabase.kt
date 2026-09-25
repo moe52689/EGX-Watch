@@ -61,7 +61,7 @@ interface EngineDao {
     @Query("DELETE FROM market_snapshots WHERE fingerprint NOT IN (SELECT fingerprint FROM market_snapshots ORDER BY observedAt DESC LIMIT 5000)") suspend fun trimSnapshots()
     @Query("DELETE FROM opportunity_events WHERE id NOT IN (SELECT id FROM opportunity_events ORDER BY id DESC LIMIT 500)") suspend fun trimEvents()
     @Query("DELETE FROM historical_prices WHERE instrumentId NOT IN (SELECT id FROM instruments)") suspend fun pruneHistory()
-    @Query("DELETE FROM analyses WHERE instrumentId NOT IN (SELECT id FROM instruments)") suspend fun pruneAnalyses()
+    @Query("DELETE FROM analyses WHERE instrumentId != 'GLOBAL:XAUUSD' AND instrumentId NOT IN (SELECT id FROM instruments)") suspend fun pruneAnalyses()
     @Query("DELETE FROM market_snapshots WHERE instrumentId NOT IN (SELECT id FROM instruments)") suspend fun pruneSnapshots()
-    @Query("DELETE FROM provider_health WHERE provider NOT IN (:providers)") suspend fun pruneProviders(providers:List<String>)
+    @Query("DELETE FROM provider_health WHERE provider NOT LIKE 'gold:%' AND provider NOT IN (:providers)") suspend fun pruneProviders(providers:List<String>)
 }

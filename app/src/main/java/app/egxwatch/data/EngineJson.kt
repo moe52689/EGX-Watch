@@ -11,13 +11,16 @@ object EngineJson {
         .put("high",q.fields.high?.display()).put("low",q.fields.low?.display()).put("volume",q.fields.volume)
         .put("bid",q.fields.bid?.display()).put("ask",q.fields.ask?.display()).toString()
     fun analysis(a:StructuredAnalysis):String=JSONObject().put("status",a.status).put("score",a.score).put("confidence",a.confidence)
+        .put("maturity",a.maturity).put("available",JSONArray(a.available)).put("building",JSONArray(a.building)).put("observations",a.observations).put("sessions",a.sessions).put("completeness",a.completeness).put("startedAt",a.startedAt)
         .put("components",JSONObject(a.components)).put("indicators",JSONObject(a.indicators)).put("drivers",JSONArray(a.drivers)).put("risks",JSONArray(a.risks)).toString()
     fun analysis(value:String):StructuredAnalysis {
         val j=JSONObject(value)
         fun strings(key:String)=j.getJSONArray(key).let { a -> (0 until a.length()).map(a::getString) }
         val c=j.getJSONObject("components");val i=j.getJSONObject("indicators")
         return StructuredAnalysis(j.getString("status"),if(j.has("score")) j.getInt("score") else null,j.getDouble("confidence"),
-            c.keys().asSequence().associateWith(c::getInt),i.keys().asSequence().associateWith(i::getDouble),strings("drivers"),strings("risks"))
+            c.keys().asSequence().associateWith(c::getInt),i.keys().asSequence().associateWith(i::getDouble),strings("drivers"),strings("risks"),j.optString("maturity","INITIALIZING"),
+            if(j.has("available")) strings("available") else emptyList(),if(j.has("building")) strings("building") else emptyList(),
+            j.optLong("observations"),j.optInt("sessions"),j.optDouble("completeness",0.0),if(j.has("startedAt")) j.getLong("startedAt") else null)
     }
     fun history(j:JSONObject):PriceHistory {
         val a=j.getJSONArray("candles");require(a.length()<=1000)

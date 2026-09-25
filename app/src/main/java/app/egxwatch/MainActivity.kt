@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { WatchApp(openHistory = intent.getBooleanExtra("history", false), openAnalysisId = intent.getStringExtra("analysisId")) }
+        setContent { WatchApp(openGold = intent.getBooleanExtra("gold", false), openHistory = intent.getBooleanExtra("history", false), openAnalysisId = intent.getStringExtra("analysisId")) }
     }
 }
 private val Green = Color(0xFF91E4B5)
@@ -65,13 +65,18 @@ private val LightColors = lightColorScheme(primary = Color(0xFF17633F), secondar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: WatchViewModel = viewModel()) {
+fun WatchApp(openGold:Boolean=false, openHistory: Boolean = false, openAnalysisId: String? = null, vm: WatchViewModel = viewModel()) {
+    val preferences by vm.preferences.collectAsStateWithLifecycle()
     val analyses by vm.analyses.collectAsStateWithLifecycle()
     val opportunities by vm.opportunities.collectAsStateWithLifecycle()
     val engineConfig by vm.engineConfig.collectAsStateWithLifecycle()
     var analysisId by rememberSaveable { mutableStateOf(openAnalysisId) }
+    var showStorage by rememberSaveable { mutableStateOf(false) }
+    var showStatus by rememberSaveable { mutableStateOf(false) }
     var engineSettings by rememberSaveable { mutableStateOf(false) }
+    val goldConfig by vm.goldConfig.collectAsStateWithLifecycle()
     val lifecycle=androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(goldConfig.enabled,goldConfig.interval,lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { while(goldConfig.enabled) { vm.checkGold(true);kotlinx.coroutines.delay(goldConfig.interval*60000) } } }
     val settings by vm.settings.collectAsStateWithLifecycle()
     LaunchedEffect(settings.enabled,settings.interval,lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -88,7 +93,7 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
     val refreshingIds by vm.refreshingIds.collectAsStateWithLifecycle()
     var wasOnline by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(online) { if (online == true && wasOnline == false) vm.reconnected(); wasOnline = online }
-    var tab by rememberSaveable { mutableIntStateOf(if (openHistory) 2 else 0) }
+    var tab by rememberSaveable { mutableIntStateOf(if(openGold) 2 else if (openHistory) 3 else 0) }
     var listId by rememberSaveable { mutableLongStateOf(0) }
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
     var newList by remember { mutableStateOf(false) }
@@ -101,22 +106,25 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
     val dark = when (settings.theme) { "Dark" -> true; "Light" -> false; else -> isSystemInDarkTheme() }
     MaterialTheme(colorScheme = if (dark) DarkColors else LightColors,
         shapes = Shapes(medium = RoundedCornerShape(20.dp), large = RoundedCornerShape(28.dp))) {
+        if(preferences?.onboardingSeen==false) AlertDialog(onDismissRequest={},title={Text("Your history starts here")},
+            text={Text("Analytics improve over time as EGX Watch collects verified market observations. No pre-installation history is required or invented. Choose instruments in Markets and configure an authorized current-price connection. Gold has its own optional free feed. Indicators unlock as valid observations accumulate.")},
+            confirmButton={TextButton(onClick=vm::beginCollection) { Text("Start monitoring") }})
         Scaffold(snackbarHost = { SnackbarHost(snackbar) }, topBar = {
             TopAppBar(title = {
                 Column { Text(if(analysisId!=null) "Opportunity analysis" else if(engineSettings) "Engine settings" else if (detail != null) detail.ticker else "EGX Watch", fontWeight = FontWeight.Bold)
                     Text(if (detail != null) "Instrument details" else "YOUR MARKET. IN FOCUS.", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary) }
             }, navigationIcon = {
-                if (detail != null || analysisId!=null || engineSettings) IconButton(onClick = { detailId = null;analysisId=null;engineSettings=false }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+                if (detail != null || analysisId!=null || engineSettings || showStatus || showStorage) IconButton(onClick = { detailId = null;analysisId=null;engineSettings=false;showStatus=false;showStorage=false }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
             }, actions = {
-                if (detail == null) IconButton(onClick = vm::check, enabled = !busy) {
+                if (detail == null) IconButton(onClick = { if(tab==2) vm.checkGold() else vm.check() }, enabled = !busy) {
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(Icons.Outlined.Refresh, "Check now")
                 }
             })
         }, bottomBar = {
-            if (detail == null && analysisId==null && !engineSettings) NavigationBar {
-                val labels = listOf("Watchlist", "Discover", "History", "Settings", "Status")
-                val icons = listOf(Icons.AutoMirrored.Outlined.ShowChart, Icons.Outlined.Search, Icons.Outlined.Notifications, Icons.Outlined.Settings, Icons.Outlined.Info)
+            if (detail == null && analysisId==null && !engineSettings && !showStatus && !showStorage) NavigationBar {
+                val labels = listOf("Home", "Markets", "Gold", "Alerts", "Settings")
+                val icons = listOf(Icons.AutoMirrored.Outlined.ShowChart, Icons.Outlined.Search, Icons.Outlined.Star, Icons.Outlined.Notifications, Icons.Outlined.Settings)
                 labels.forEachIndexed { index, label -> NavigationBarItem(selected = tab == index,
                     onClick = { tab = index }, icon = { Icon(icons[index], label) }, label = { Text(label) }) }
             }
@@ -125,21 +133,14 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
                 when {
                     analysisId != null -> OpportunityScreen(analyses.firstOrNull { it.instrumentId == analysisId })
                     engineSettings -> EngineSettingsScreen(engineConfig, settings) { vm.saveEngine(it) }
-                    tab == 4 -> MonitoringStatusScreen(vm)
-                    detail != null -> InstrumentDetail(detail, analysis = analyses.firstOrNull { it.instrumentId==detail.id }, onAnalysis = { analysisId=detail.id }, onRetry = { vm.retry(detail.id) }, refreshing = detail.id in refreshingIds,
+                    showStorage -> StorageScreen(vm)
+                    showStatus -> MonitoringStatusScreen(vm)
+                    tab == 2 -> GoldScreen(vm)
+                    detail != null -> InstrumentDetail(detail, vm = vm, analysis = analyses.firstOrNull { it.instrumentId==detail.id }, onAnalysis = { analysisId=detail.id }, onRetry = { vm.retry(detail.id) }, refreshing = detail.id in refreshingIds,
                         onRemove = { vm.remove(detail); detailId = null }, onSave = { a, p -> vm.thresholds(detail, a, p) })
                     tab == 0 -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        item {
-                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                                Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text("Your market at a glance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        SmallTag("${rows.size} instruments")
-                                        SmallTag(if (settings.enabled) "Every ${settings.interval} min" else "Monitoring paused")
-                                    }
-                                }
-                            }
-                        }
+                        item { DashboardOverview(vm,rows.size) { showStatus=true } }
+                        item { GoldSummary(vm) { tab=2 } }
                         item {
                             Text(when { busy -> "Refreshing your instruments…"; online == false -> "Offline · your saved values remain available";
                                 rows.any { it.error != null } -> "Some sources need attention · retry on each card";
@@ -150,7 +151,7 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
                             if (online == false) Text("Updates resume when the connection returns.", style = MaterialTheme.typography.bodySmall)
                         }
                         if (settings.providerUrl.isBlank() && !settings.freeFeeds) item {
-                            InfoCard("Start with a data connection", "Connect an authorized provider in Settings. Your saved data remains available.", "Set up provider") { tab = 3 }
+                            InfoCard("Start with a data connection", "Connect an authorized provider in Settings. Your saved data remains available.", "Set up provider") { tab = 4 }
                         }
                         item {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -162,39 +163,25 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
                             }
                         }
                         if (rows.isEmpty()) item { InfoCard("Make this watchlist yours", "Search a ticker or a fund name. Every addition is checked against the selected provider’s directory.", "Find instruments") { tab = 1 } }
-                        items(rows, key = { it.id }) { row -> InstrumentCard(row, onRetry = { vm.retry(row.id) }, refreshing = busy || row.id in refreshingIds, analysis = analyses.firstOrNull { it.instrumentId==row.id }) { detailId = row.id } }
+                        if(opportunities.isNotEmpty()) item {
+                            Text("Recent signals",style=MaterialTheme.typography.titleMedium,color=MarketPalette.analytics())
+                            opportunities.take(3).forEach { event -> TextButton(onClick={analysisId=event.instrumentId}) {
+                                Text("${event.ticker} · score ${event.score} · ${localTime(event.createdAt)}")
+                            } }
+                        }
+                        items(rows, key = { it.id }) { row -> MarketInstrumentCard(row,vm,analyses.firstOrNull { it.instrumentId==row.id }) { detailId = row.id } }
                         item {
                             Button(onClick = { tab = 1 }, modifier = Modifier.fillMaxWidth(), enabled = currentList != null) { Icon(Icons.Outlined.Add, null); Text("Add instrument") }
                             if (currentList != null) TextButton(onClick = { deleteList = true }) { Text("Delete this watchlist") }
                         }
                     }
                     tab == 1 -> SearchScreen(vm, currentList) { newList = true }
-                    tab == 2 -> LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        item { Text("Your notification history", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                            Text("Latest 500 of each type · opportunities first", style = MaterialTheme.typography.bodySmall) }
-                                                items(opportunities,key={"opportunity-${it.id}"}) { event ->
-                            OutlinedCard(onClick={analysisId=event.instrumentId}) { Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                                Text("${event.ticker} · analytical opportunity",fontWeight=FontWeight.Bold)
-                                Text("Score ${event.score}/100 · ${formatTime(Instant.ofEpochMilli(event.createdAt).toString())}")
-                                Text(event.delivery,style=MaterialTheme.typography.labelSmall)
-                                Text("Tap for latest analysis and data freshness",style=MaterialTheme.typography.bodySmall)
-                            } }
+                    tab == 3 -> AlertsScreen(vm) { id ->
+                        if(id==GlobalGold.instrument.id) tab=2 else {
+                            instruments.firstOrNull { it.id==id }?.let { listId=it.listId;detailId=it.id;tab=0 }
                         }
-                        if (alerts.isEmpty() && opportunities.isEmpty()) item { InfoCard("All quiet for now", "Alerts appear after a verified value changes. The first successful check establishes a baseline unless every-check alerts are enabled.") }
-                        items(alerts, key = { it.id }) { alert ->
-                            Card { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("${alert.ticker} · ${alert.name}", fontWeight = FontWeight.Bold)
-                                Text("${alert.current} ${alert.currency}", style = MaterialTheme.typography.headlineSmall)
-                                Text("${alert.kind} · Previous ${alert.previous ?: "—"} ${alert.currency}")
-                                Text("Change ${alert.absolute ?: "—"} ${alert.currency} / ${alert.percent ?: "N/A"}%")
-                                Text(dataTime(alert.dataTimestamp, alert.timestampBasis), style = MaterialTheme.typography.bodySmall)
-                                Text("Checked: ${formatTime(alert.checkedAt)}", style = MaterialTheme.typography.bodySmall)
-                                Text("${alert.source}\n${alert.delivery}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            } }
-                        }
-                        if (alerts.isNotEmpty()) item { TextButton(onClick = vm::clearHistory) { Text("Clear price-alert history") } }
                     }
-                    else -> SettingsScreen(settings, vm) { engineSettings=true }
+                    else -> SettingsScreen(settings, vm, onStorage={showStorage=true}) { engineSettings=true }
                 }
             }
         }
@@ -315,7 +302,7 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
         }
     }
 }
-@Composable private fun InstrumentDetail(row: TrackedInstrument, analysis:AnalysisResult?, onAnalysis: () -> Unit, onRetry: () -> Unit, refreshing: Boolean,
+@Composable private fun InstrumentDetail(row: TrackedInstrument, vm:WatchViewModel, analysis:AnalysisResult?, onAnalysis: () -> Unit, onRetry: () -> Unit, refreshing: Boolean,
     onRemove: () -> Unit, onSave: (String, String) -> Unit) {
     var absolute by remember(row.id) { mutableStateOf(row.absoluteThreshold ?: "") }
     var percent by remember(row.id) { mutableStateOf(row.percentThreshold ?: "") }
@@ -323,6 +310,8 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
         item { Text(row.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("${row.type} · ${row.currency}", color = MaterialTheme.colorScheme.primary) }
         item { InstrumentCard(row, onRetry, refreshing, analysis) {} }
+        item { LocalHistoryPanel(vm,row.id,row.currency,analysis) }
+        item { MaturityCard(analysis) }
         item { Button(onClick=onAnalysis,modifier=Modifier.fillMaxWidth()) { Text("Explore analysis & risks") } }
         row.error?.let { error -> item { InfoCard("Connection details", error) } }
         item {
@@ -341,7 +330,8 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
     }
 }
 
-@Composable private fun SettingsScreen(settings: Settings, vm: WatchViewModel, onEngine: () -> Unit) {
+@Composable private fun SettingsScreen(settings: Settings, vm: WatchViewModel, onStorage:()->Unit, onEngine: () -> Unit) {
+    val preferences by vm.preferences.collectAsStateWithLifecycle()
     val market by vm.market.collectAsStateWithLifecycle()
     var draft by remember(settings) { mutableStateOf(settings) }
     var interval by remember(settings) { mutableStateOf(settings.interval.toString()) }
@@ -352,9 +342,10 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
         vm.message.value = if (it) "Notifications allowed" else "Notifications blocked; alert history still records events"
     }
     LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item { TextButton(onClick=onStorage) { Text("Storage, export & collected history") } }
         item { Text("Make it work for you", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
         item { Text("Data connection", style = MaterialTheme.typography.titleLarge)
-            Text("Connect an authorized HTTPS gateway for verified prices and historical data. Saved observations remain visible offline.", style = MaterialTheme.typography.bodySmall)
+            Text("Connect an authorized HTTPS gateway for verified current prices. Saved observations remain visible offline.", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick=onEngine) { Text("Analytics, fallbacks & calendar") }
             Text("Website feeds are disabled pending authorized API access. Provider API keys belong on your gateway server.", style = MaterialTheme.typography.bodySmall) }
         item { OutlinedTextField(draft.providerUrl, { draft = draft.copy(providerUrl = it.trim()) }, Modifier.fillMaxWidth(),
@@ -365,6 +356,8 @@ fun WatchApp(openHistory: Boolean = false, openAnalysisId: String? = null, vm: W
             Column(Modifier.weight(1f)) { Text("Background monitoring", style = MaterialTheme.typography.titleMedium); Text("Android may delay checks to save battery.", style = MaterialTheme.typography.bodySmall) }
             Switch(draft.enabled, { draft = draft.copy(enabled = it) })
         } }
+        item { Row { Switch(preferences?.egxOffHours==true,{vm.offHours(it)});Text("Collect EGX outside configured sessions",Modifier.padding(12.dp)) }
+            Text("Optional collection only; opportunity notifications still respect the EGX session calendar.",style=MaterialTheme.typography.bodySmall) }
         item { Text("Check interval", style = MaterialTheme.typography.titleMedium)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(15L to "15 min", 30L to "30 min", 60L to "1 hour", 120L to "2 hours").forEach { (minutes, label) ->

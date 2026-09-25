@@ -1,3 +1,9 @@
+# Current release: 1.4 forward collection
+
+The Android analytics pipeline requires current quotes only. It never calls the history route below. That route describes a legacy optional adapter, retained for compatibility/testing; no historical subscription or pre-installation history is needed.
+
+Gold gateways use instrument id `GLOBAL:XAUUSD`, ticker `XAU/USD`, type `COMMODITY`, currency `USD` and quote kind `SPOT` with `PROVIDER_SNAPSHOT` timestamp basis. Values are USD per troy ounce. Provide no API keys in URLs.
+
 # Authorized market-data gateway contract · 1.3
 
 No live API entitlement, vendor key or gateway is bundled. To activate this app you
@@ -31,7 +37,7 @@ The app revalidates the selected ID/ticker/type/currency on addition. Example sc
 }
 ```
 
-Types STOCK/ETF/FUND; id and ticker max 160, name max 200, three uppercase currency
+Types STOCK/ETF/FUND/COMMODITY; id and ticker max 160, name max 200, three uppercase currency
 letters, verifiedAt ISO date. Distinct share classes/currencies require distinct IDs.
 Existing built-in IDs: EGX:CCAP, EGX:BINV, EGX:EGX30ETF, EG:FUND:T70,
 EG:FUND:CTQ, EG:FUND:AZG, EG:FUND:BFA; other equities use EGX:ticker.

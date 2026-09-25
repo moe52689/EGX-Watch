@@ -11,8 +11,8 @@ android {
         applicationId = "app.egxwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 5
+        versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
@@ -36,6 +36,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.18.3")
+    implementation("com.patrykandpatrick.vico:compose:2.1.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250107")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

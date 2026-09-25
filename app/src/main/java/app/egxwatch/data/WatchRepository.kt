@@ -74,7 +74,7 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
         val settings = dao.getSettings() ?: Settings()
         val policy = settings.policy()
         config=database.engineDao().config() ?: EngineConfig()
-        if (background && (!settings.enabled || !config.calendar(settings).isOpen(Instant.now()))) return@withLock 0
+        if (background && (!settings.enabled || !EgxSessionManager(settings,config,database.forwardDao().preferences()?.egxOffHours==true).isOpen(Instant.now()))) return@withLock 0
         if(background && database.engineDao().status()?.lastAttempt?.let { Instant.now().toEpochMilli()-it < settings.interval*60000 }==true) return@withLock 0
         database.engineDao().let { d -> d.status((d.status() ?: EngineStatus()).copy(lastAttempt=Instant.now().toEpochMilli(),message="Checking configured sources")) }
         val provider = provider(settings)
@@ -123,6 +123,7 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
                     }
                     pending.firstOrNull()?.let { event ->
                         val id = dao.insertAlert(event)
+                        database.forwardDao().alert(AlertCenter.stock(event.copy(id=id)))
                         pending.clear(); pending += event.copy(id = id)
                     }
                     dao.trimHistory()

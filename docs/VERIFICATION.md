@@ -1,46 +1,63 @@
-# Verification · EGX Watch 1.3.0 / build 4
+# Verification · EGX Watch 1.4.0 / build 5
 
-Verified 25 September 2026 with JDK 17, Gradle 8.13, Android SDK 35 and an
-Android 15/API 35 x86_64 emulator. Each development stage compiled and passed its
-unit-test gate before the next stage. The final suite has **55 JVM tests** and
-**15 emulator/instrumentation tests**, using mocks rather than live market APIs.
+Executed locally on 2026-09-25 with JDK 17, Gradle 8.13, SDK/build-tools 35.
 
-Coverage includes:
+- Every planned implementation stage reached a successful debug build and unit-test gate.
+- Final `assembleDebug testDebugUnitTest lintDebug`: successful.
+- **69 JVM unit tests, zero failures/errors.**
+- **20 Android instrumentation tests, zero failures**, on isolated EGXWatchApi35
+  emulator, Android 15/API 35. No live API dependency in the test suite.
+- Lint: **0 errors, 23 warnings**. Remaining warnings concern newer toolchain/library
+  versions, target API, KAPT versus KSP, and two optional KTX-style suggestions.
+- `git diff --check`: no whitespace errors.
+- APK signer and manifest verified: package `app.egxwatch`, min API 26, target 35,
+  versionName `1.4.0`, versionCode `5`.
+- The actual packaged APK successfully upgraded the locally signed 1.3.0 APK on the
+  emulator using `adb install -r`. The connected physical phone was not modified.
 
-- Session windows/weekends, Cairo timezone, holidays, exception windows and next session.
-- Missing, stale, malformed, mismatched and discontinuous data; NAV timestamp semantics.
-- Ordered failover, offline errors, timeout, HTTP 429 Retry-After and provider cooldown
-  retained across repository recreation; sanitized provider health messages.
-- Snapshot fingerprint normalization, rich quote/analysis/history serialization,
-  SMA/EMA/RSI/MACD/ATR/drawdown reference values and reproducible scoring.
-- Opportunity score/confidence thresholds, material change, state re-entry, duplicate
-  suppression, cooldown, quiet hours and daily limit decisions.
-- Room v1 → v2 → v3 migration retaining watchlist, value, timestamp and settings.
-- Room-backed analysis/event/alert-state persistence after database close/reopen,
-  repeated snapshot suppression and cached historical data; no off-session polling.
-- Existing price/NAV baselines, provider changes, late in-flight results, concurrent
-  settings changes, per-security thresholds and saved-value retention.
-- Compose fresh-start watchlist, identity search/addition, disabled duplicate addition,
-  History, Settings, analytics/calendar navigation and Status navigation.
-- Production provider selection cannot re-enable undocumented public feeds.
+## Covered behavior
 
-Debug assembly, JVM tests, instrumentation and Android lint are the build gate.
-Lint has zero errors; dependency/target-version, KAPT and KTX style warnings remain.
-No dependency upgrade was bundled into this feature change. Final APK signature is
-verified and its certificate matches the prior local debug build:
-`a26df6b9dfb6a6fbf53a9bc0b56309b2cd17e7bbe1512209936c68ecf82d825f`.
+Existing tests cover provider timeout/rate-limit/failover, source identity/validation,
+market-calendar weekends/holidays/exception windows, malformed/stale data, persisted
+health, cached values, notifications and opportunity thresholds/dedup/cooldown.
 
-APK package `app.egxwatch`, versionName `1.3.0`, versionCode `4`, minimum API 26.
-The APK installs and launches on the emulator; the empty initial dark-theme UI was
-visually inspected. The checksum is in `artifacts/SHA256SUMS.txt`.
+New JVM suites cover independent maturity gates, missing history, chart-range access,
+adaptive calculations/no premature long indicators, bad discontinuities, independent
+gold scheduling, gold JSON/timestamps, threshold crossing/baseline/cooldown/dedup,
+lookback insufficiency, and archive authenticated round-trip/wrong password/tampering.
 
-No real authorized EGX gateway was supplied or tested. There is no claim of live
-exchange connectivity, full market coverage, predictive accuracy or financial returns.
-No physical-device, extended Doze/battery, production authentication, penetration or
-load test has been performed. Android notification permission/channel checks are
-implemented; notification delivery timing still depends on the OS.
+Room integration covers forward-only collection, duplicate and out-of-order rejection,
+NAV revision without sample inflation, sampled OHLC/slot aggregation, stale exclusion,
+compaction retaining aggregates, reset, gold cooldown/dedup/read/dismiss after reopening
+the database, and bounded chart queries over 10,000 observations. The migration test
+validates v1→v5 schema while preserving user selections/latest values. Existing engine
+restart test now asserts that the historical API is never called.
 
-Reproduce using the README build/test commands. Test reports are local under
-`app/build/reports/tests/`, `app/build/reports/androidTests/` and the lint report.
-The instrumentation UI fixture clears the test application's database; run it on a
-dedicated emulator, not a personal watchlist installation.
+Compose smoke test exercises navigation, instrument search/validation/addition, alerts,
+settings and monitoring status. Fresh-install onboarding and gold layout were inspected
+visually on the emulator. A separate manual network smoke check retrieved an actual
+Gold-API XAU/USD observation with provider/receipt timestamps; it was not a test fixture
+or an automated-test dependency. No authorized live EGX connection is available to
+verify production EGX coverage. Screenshots remain in ignored `artifacts/screenshots`.
+
+## Signed artifact
+
+`artifacts/EGX-Watch-v1.4.0-build5-2026-09-25-debug.apk`
+
+SHA-256:
+`38441381200f786edf84ebbd559d79f77515d67b244806f734ea319a3cb49d27`
+
+Signing certificate SHA-256 (same as the prior delivered APK):
+`a26df6b9dfb6a6fbf53a9bc0b56309b2cd17e7bbe1512209936c68ecf82d825f`
+
+This is a debug/development artifact. Preserve the existing private debug keystore for
+local upgrades. Locally it is under ignored `.tools/android-user/debug.keystore` and
+builds must set `ANDROID_USER_HOME` to that directory. Other machines/CI use different
+debug keys unless deliberately configured. Never commit signing material.
+
+## Remaining acceptance work
+
+Real-device Doze/force-stop/overnight tests, full Arabic translation/RTL visual audit,
+TalkBack and large-font review, authenticated gateway pilot, authoritative calendar,
+long-running storage/battery profiling and archive restore remain next milestones.
+No profitable-outcome claim or calibrated prediction validation is made.

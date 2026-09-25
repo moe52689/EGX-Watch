@@ -40,7 +40,7 @@ private fun time(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneI
 }
 @Composable fun OpportunityScreen(record:AnalysisResult?) {
     LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-        if(record==null) item { Section("Analysis unavailable","A verified snapshot and sufficient historical data are required. Connect an authorized gateway in Settings.") }
+        if(record==null) item { Section("Analysis unavailable","Analytics build from verified observations collected here. Connect a current-price provider and allow history to grow. No historical subscription is required.") }
         else {
             val a=record.analysis();val q=record.quote();val freshness=q.freshness(Instant.now())
             item { Text(record.ticker,style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Bold);Text(record.name,style=MaterialTheme.typography.titleMedium) }
@@ -55,7 +55,7 @@ private fun time(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneI
             item { Section("Why was this detected?",a.drivers.joinToString("\n") { "• $it" }.ifEmpty { "No qualified signals" }) }
             item { Section("Risks & missing context",a.risks.joinToString("\n") { "• $it" }.ifEmpty { "Insufficient information to assess risk" }) }
             if(a.indicators.isNotEmpty()) item { Section("Reproducible calculations",a.indicators.entries.joinToString("\n") { "${it.key}: ${String.format(Locale.US,"%.4f",it.value)}" }) }
-            item { Section("How to read this",StructuredExplanationEngine().explain(a)+"\nRisk resilience is higher when historical risk is lower. Missing valuation and market-context scores are not assumed neutral. Daily indicators use completed observations; NAVs are not executable prices.") }
+            item { Section("How to read this",StructuredExplanationEngine().explain(a)+"\nRisk resilience is higher when historical risk is lower. Missing valuation and market-context scores are not assumed neutral. Indicators use completed locally sampled sessions; NAVs are not executable prices.") }
         }
     }
 }

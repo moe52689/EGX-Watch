@@ -50,3 +50,14 @@ The debug APK is debuggable and development signed. This is not a penetration-te
 certification. Production needs release signing, authenticated backend threat modelling,
 monitoring/quotas and physical-device/Doze testing. Source rights must explicitly cover
 this application and automated analytics.
+
+## 1.4 forward-history update
+
+Current analytics use locally collected observations; no historical subscription or
+historical API route is required. Room v5 adds gold/collection state. Export uses
+password-derived AES-256-GCM logical database archives with authenticated headers;
+private SQLite is protected by Android storage but not independently encrypted by
+SQLCipher. Passwords are not persisted. No plaintext export file is staged.
+Gold's public current-price adapter has no secret. Existing HTTPS/no-embedded-key
+rules apply to custom gateways. See FORWARD_RELEASE.md for exact archive format,
+retention, current limits, and VERIFICATION.md for executed security tests.

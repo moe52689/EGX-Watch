@@ -1,6 +1,7 @@
 package app.egxwatch
 
 import androidx.compose.ui.test.*
+import app.egxwatch.data.ForwardPreferences
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
@@ -14,11 +15,12 @@ class UiSmokeTest {
         val app = rule.activity.application as WatchApplication
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.database.clearAllTables() }
         app.repository.initialize()
+        app.database.forwardDao().save(ForwardPreferences(onboardingSeen=true))
     }
     @Test fun mainNavigationAndInstrumentValidationAreVisible() {
         rule.onNodeWithText("EGX Watch").assertIsDisplayed()
-        rule.waitUntil(10000) { runCatching { rule.onNodeWithText("0 instruments").assertIsDisplayed() }.isSuccess }
-        rule.onNodeWithText("Discover").performClick()
+        rule.waitUntil(10000) { runCatching { rule.onNodeWithText("MARKET MONITOR").assertIsDisplayed() }.isSuccess }
+        rule.onNodeWithText("Markets").performClick()
         rule.onNodeWithText("Ticker or full name").performTextInput("CCAP")
         rule.onNodeWithText("Ticker or full name").performImeAction()
         rule.waitUntil(10000) { rule.onAllNodesWithText("1 results", substring = true).fetchSemanticsNodes().isNotEmpty() }
@@ -27,16 +29,17 @@ class UiSmokeTest {
         rule.onNodeWithText("Validate & add").performClick()
         rule.waitUntil(10000) { rule.onAllNodesWithText("Added").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Added").assertIsNotEnabled()
-        rule.onNodeWithText("Watchlist").performClick()
-        rule.waitUntil(10000) { runCatching { rule.onNodeWithText("1 instruments").assertIsDisplayed() }.isSuccess }
-        rule.onNodeWithText("History").performClick()
-        rule.onNodeWithText("Your notification history").assertIsDisplayed()
+        rule.onNodeWithText("Home").performClick()
+        rule.waitUntil(10000) { runCatching { rule.onNodeWithText("Home").assertIsDisplayed() }.isSuccess }
+        rule.onNodeWithText("Alerts").performClick()
+        rule.onNodeWithText("No alerts in this category yet.").assertIsDisplayed()
         rule.onNodeWithText("Settings").performClick()
         rule.onNodeWithText("Data connection").assertIsDisplayed()
         rule.onNodeWithText("Analytics, fallbacks & calendar").performClick()
         rule.onNodeWithText("Analytics & calendar").assertIsDisplayed()
         rule.onNodeWithContentDescription("Back").performClick()
-        rule.onNodeWithText("Status").performClick()
+        rule.onNodeWithText("Home").performClick()
+        rule.onNodeWithText("MARKET MONITOR").performClick()
         rule.onNodeWithText("Monitoring status").assertIsDisplayed()
     }
 }
