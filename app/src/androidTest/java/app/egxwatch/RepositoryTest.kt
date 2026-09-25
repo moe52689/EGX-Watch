@@ -7,6 +7,9 @@ import app.egxwatch.data.*
 import app.egxwatch.domain.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeout
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
@@ -22,10 +25,14 @@ class RepositoryTest {
     private var time = Instant.parse("2026-01-01T10:00:00Z")
     private var failure = false
     private var cached = false
+    private var started: CompletableDeferred<Unit>? = null
+    private var release: CompletableDeferred<Unit>? = null
     private val fake = object : MarketDataProvider {
         override suspend fun search(query: String) = listOf(instrument)
         override suspend fun resolve(id: String) = instrument
         override suspend fun quote(instrument: Instrument): Quote {
+            started?.complete(Unit)
+            release?.await()
             if (failure || instrument.ticker != "CCAP") throw IOException("No feed")
             return Quote(instrument.id, value.toBigDecimal(), "EGP", DataKind.DELAYED, time, "Test only", 15,
                 notice = if (cached) "Saved feed: offline" else null)
@@ -79,7 +86,7 @@ class RepositoryTest {
         assertEquals(1, check())
     }
     @Test fun providerSwitchRetainsValuesAndEstablishesNewBaseline() = runBlocking {
-        check(); repo.save(Settings(freeFeeds = false))
+        check(); repo.save(Settings(providerUrl = "https://replacement.example/v1/"))
         assertEquals("10", db.dao().getInstruments().single().value)
         assertNull(db.dao().getInstruments().single().baselineKey)
         assertEquals(0, repo.check(true) { "unexpected" })
@@ -123,5 +130,16 @@ class RepositoryTest {
         assertEquals("10", row.previous)
         assertEquals(time.toString(), row.timestamp)
         assertEquals(1, db.dao().history().first().size)
+    }
+    @Test fun slowFeedDoesNotBlockSettingsOrOverwriteAfterProviderChange() = runBlocking {
+        check()
+        started = CompletableDeferred(); release = CompletableDeferred()
+        value = "999"; time = time.plusSeconds(900)
+        val pending = async { check() }
+        withTimeout(5000) { started!!.await(); repo.save(Settings(providerUrl = "https://replacement.example/v1/")) }
+        release!!.complete(Unit)
+        pending.await()
+        assertEquals("10", db.dao().getInstruments().single().value)
+        assertTrue(db.dao().history().first().isEmpty())
     }
 }

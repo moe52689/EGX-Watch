@@ -53,8 +53,8 @@ class FeedCacheTest {
         val visited = mutableListOf<String>()
         val provider = FreePublicProvider(PublicFeedClient { url, _ -> visited += url; throw IOException("Test unavailable") })
         val report = provider.health()
-        assertEquals(3, visited.size)
-        assertEquals(3, Regex("FAILED").findAll(report).count())
+        assertEquals(4, visited.size)
+        assertEquals(4, Regex("FAILED").findAll(report).count())
         assertFalse(report.contains("Connected"))
     }
 }

@@ -12,8 +12,11 @@ import java.util.Locale
 
 class FreePublicProvider(private val feeds: PublicFeedClient = PublicFeedClient()) : MarketDataProvider {
     @Volatile private var catalogue = DirectoryProvider.instruments
+    suspend fun beginCheck() = feeds.beginCheck()
+    fun finishCheck() = feeds.finishCheck()
+    fun networkChanged() = feeds.networkChanged()
     override suspend fun search(query: String) = catalogue.filter {
-        it.ticker.contains(query.trim(), true) || it.name.contains(query.trim(), true)
+        it.ticker.contains(query.trim(), true) || it.name.contains(query.trim(), true) || it.id.contains(query.trim(), true)
     }
     override suspend fun resolve(id: String) = catalogue.singleOrNull { it.id == id }
         ?: throw IOException("Instrument not in the validated directory. Refresh Discover and try again.")
@@ -21,6 +24,7 @@ class FreePublicProvider(private val feeds: PublicFeedClient = PublicFeedClient(
         val notes = mutableListOf<String>()
         var stocks = catalogue.filter { it.type != InstrumentType.FUND }
         var funds = catalogue.filter { it.type == InstrumentType.FUND }
+        var issuer = catalogue.filter { it.id.startsWith("AZIMUT:") }
         try {
             val response = feeds.get(InstrumentCatalog.STOCKS_URL, InstrumentCatalog.STOCKS_QUERY) { InstrumentCatalog.stocks(it) }
             stocks = InstrumentCatalog.stocks(response.body, response.fetchedAt.atZone(ZoneOffset.UTC).toLocalDate().toString())
@@ -31,20 +35,24 @@ class FreePublicProvider(private val feeds: PublicFeedClient = PublicFeedClient(
             funds = InstrumentCatalog.funds(response.body, response.fetchedAt.atZone(ZoneOffset.UTC).toLocalDate().toString())
             response.warning?.let(notes::add)
         } catch (e: CancellationException) { throw e } catch (e: Exception) { notes += "Fund directory: ${e.message}; using saved identities" }
-        catalogue = (DirectoryProvider.referenceInstruments + stocks + funds).distinctBy { it.id }.sortedBy { it.ticker }
+        try {
+            val response = issuerFeed()
+            issuer = FundDirectory.issuer(response.body, response.fetchedAt.atZone(ZoneOffset.UTC).toLocalDate().toString())
+            response.warning?.let(notes::add)
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { notes += "Issuer directory unavailable; using saved identities" }
+        catalogue = (DirectoryProvider.referenceInstruments + stocks + funds + issuer + catalogue).distinctBy { it.id }.map(FundDirectory::decorate).sortedBy { it.ticker }
         "${catalogue.count { it.type == InstrumentType.STOCK }} stocks · ${catalogue.count { it.type == InstrumentType.FUND }} funds · ${catalogue.count { it.type == InstrumentType.ETF }} ETFs" +
             if (notes.isEmpty()) " · Directory refreshed" else "\n" + notes.joinToString("\n")
     }
-    private suspend fun stockFeed(force: Boolean = false) = feeds.get(EGXPILOT, force = force) {
-        require(JSONObject(it).getJSONArray("stocks").length() > 0) { "Empty stock response" }
-    }
+    private suspend fun stockFeed(force: Boolean = false) = feeds.get(InstrumentCatalog.STOCKS_URL, FeedParsers.STOCK_QUERY, force) { InstrumentCatalog.stocks(it) }
+    private suspend fun issuerFeed(force: Boolean = false) = feeds.get(AZIMUT, force = force) { require(FundDirectory.issuer(it, LocalDate.now().toString()).isNotEmpty()) }
     private suspend fun fundFeed(force: Boolean = false) = feeds.get(SNDUK, force = force) { InstrumentCatalog.funds(it) }
     override suspend fun quote(instrument: Instrument): Quote = withContext(Dispatchers.IO) {
         val quote = when {
-            instrument.id == "EG:FUND:AZG" -> {
+            FundDirectory.issuerId(instrument) != null -> {
                 val candidates = mutableListOf<Quote>(); val errors = mutableListOf<String>()
                 try {
-                    val response = feeds.get(AZIMUT) { parseAzimut(instrument, it) }
+                    val response = issuerFeed()
                     val nav = parseAzimut(instrument, response.body).copy(notice = response.warning)
                     validateQuote(instrument, nav); candidates += nav
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { errors += "Azimut: ${e.message}" }
@@ -53,15 +61,19 @@ class FreePublicProvider(private val feeds: PublicFeedClient = PublicFeedClient(
                     val nav = parseSnduk(instrument, response.body).copy(notice = response.warning)
                     validateQuote(instrument, nav); candidates += nav
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { errors += "SNDUK: ${e.message}" }
-                candidates.maxByOrNull { it.timestamp } ?: throw IOException(errors.joinToString("; "))
+                candidates.maxWithOrNull(compareBy<Quote> { it.timestamp }.thenBy { it.notice == null }) ?: throw IOException(errors.joinToString("; "))
             }
             instrument.type == InstrumentType.FUND -> {
                 val response = fundFeed()
                 parseSnduk(instrument, response.body).copy(notice = response.warning)
             }
+            instrument.id == "EGX:EGX30ETF" -> {
+                val response = feeds.get(ETF) { FeedParsers.etf(instrument, FeedResponse(it, Instant.now())) }
+                FeedParsers.etf(instrument, response)
+            }
             instrument.id.startsWith("EGX:") -> {
                 val response = stockFeed()
-                parsePublicStock(instrument, response.body).copy(notice = response.warning)
+                FeedParsers.stock(instrument, response)
             }
             else -> throw IOException("No public quote source for ${instrument.ticker}")
         }
@@ -74,10 +86,10 @@ class FreePublicProvider(private val feeds: PublicFeedClient = PublicFeedClient(
             try { lines += "$name: ${block()}" } catch (e: CancellationException) { throw e }
             catch (e: Exception) { lines += "$name: FAILED · ${e.message}" }
         }
-        inspect("EGXpilot") {
+        inspect("TradingView stocks") {
             val response = stockFeed(true)
-            val sample = parsePublicStock(resolve("EGX:CCAP"), response.body); validateQuote(resolve("EGX:CCAP"), sample)
-            "${response.warning ?: "Connected"} · ${JSONObject(response.body).getJSONArray("stocks").length()} source rows · CCAP ${sample.value} · snapshot ${sample.timestamp}"
+            val sample = FeedParsers.stock(resolve("EGX:CCAP"), response); validateQuote(resolve("EGX:CCAP"), sample)
+            "${response.warning ?: "Connected"} · ${JSONObject(response.body).getJSONArray("data").length()} source rows · CCAP ${sample.value} · retrieved ${sample.timestamp}; trade time not provided"
         }
         inspect("SNDUK") {
             val response = fundFeed(true)
@@ -90,6 +102,12 @@ class FreePublicProvider(private val feeds: PublicFeedClient = PublicFeedClient(
             val sample = parseAzimut(instrument, response.body); validateQuote(instrument, sample)
             "${response.warning ?: "Connected"} · AZG NAV ${sample.value}"
         }
+        inspect("EGX30ETF issuer") {
+            val instrument = resolve("EGX:EGX30ETF")
+            val response = feeds.get(ETF, force = true) { FeedParsers.etf(instrument, FeedResponse(it, Instant.now())) }
+            val nav = FeedParsers.etf(instrument, response); validateQuote(instrument, nav)
+            "${response.warning ?: "Connected"} · published NAV ${nav.value} EGP (not traded price)"
+        }
         lines.joinToString("\n\n")
     }
     override suspend fun marketStatus() = MarketStatus("Unknown", "Public stock snapshots are indicative. Fund NAVs retain their valuation dates. Exchange status is not verified.", null)
@@ -97,16 +115,18 @@ class FreePublicProvider(private val feeds: PublicFeedClient = PublicFeedClient(
         const val AZIMUT = "https://app.azimut.eg/api/fund/list?size=100&web=true"
         const val SNDUK = "https://snduk.com/eg/page/mutual-funds-prices-today?lang=en"
         const val EGXPILOT = "https://egxpilot.com/api/stocks/all"
+        const val ETF = "https://www.egx30etf.com/"
         private fun valuationDate(value: String) = LocalDate.parse(value).atStartOfDay(ZoneId.of("Africa/Cairo")).toInstant()
         fun parseAzimut(instrument: Instrument, body: String): Quote {
-            require(instrument.id == "EG:FUND:AZG")
+            val expectedId = requireNotNull(FundDirectory.issuerId(instrument)) { "No issuer mapping for this fund" }
             val funds = JSONObject(body).getJSONObject("response").getJSONObject("funds").getJSONArray("dataList")
-            val fund = (0 until funds.length()).map { funds.getJSONObject(it) }.singleOrNull { it.getInt("id") == 16 }
-                ?: throw IOException("AZG issuer fund ID 16 is missing")
-            require(fund.getString("slug").matches(Regex("az-gold(?:-[0-9]+)?"))) { "AZG issuer identity changed" }
-            require(fund.getJSONObject("currency").getString("symbol") == "EGP")
-            val nav = fund.getJSONObject("last_nav"); require(nav.getInt("fund_id") == 16)
-            return Quote(instrument.id, nav.get("nav").toString().toBigDecimal(), "EGP", DataKind.NAV,
+            val fund = (0 until funds.length()).map { funds.getJSONObject(it) }.singleOrNull { it.getInt("id") == expectedId }
+                ?: throw IOException("Issuer fund is missing")
+            if (expectedId == 16) require(fund.getString("slug").matches(Regex("az-gold(?:-[0-9]+)?"))) { "AZG issuer identity changed" }
+            require(fund.getJSONObject("currency").getString("symbol") == instrument.currency)
+            val nav = fund.optJSONObject("last_nav") ?: throw IOException("Issuer has not published a NAV")
+            require(nav.getInt("fund_id") == expectedId)
+            return Quote(instrument.id, nav.get("nav").toString().toBigDecimal(), instrument.currency, DataKind.NAV,
                 valuationDate(nav.getString("date")), "Azimut Egypt · issuer NAV", timestampBasis = TimestampBasis.VALUATION_DATE)
         }
         fun parseSnduk(instrument: Instrument, body: String): Quote {

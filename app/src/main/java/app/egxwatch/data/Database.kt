@@ -29,9 +29,9 @@ data class TrackedInstrument(val listId: Long, val id: String, val ticker: Strin
 
 @Entity(tableName = "settings")
 data class Settings(@PrimaryKey val id: Int = 1, val enabled: Boolean = false, val interval: Long = 15,
-    val days: String = "1,2,3,4,7", val start: String = "00:00", val end: String = "00:00",
+    val days: String = "1,2,3,4,7", val start: String = "10:00", val end: String = "14:30",
     val everyCheck: Boolean = false, val absoluteThreshold: String = "", val percentThreshold: String = "",
-    val providerUrl: String = "", val theme: String = "System", val freeFeeds: Boolean = true) {
+    val providerUrl: String = "", val theme: String = "System", val freeFeeds: Boolean = false) {
     fun policy() = MonitorPolicy(interval, days.split(',').map { DayOfWeek.of(it.toInt()) }.toSet(),
         LocalTime.parse(start), LocalTime.parse(end), everyCheck,
         absoluteThreshold.takeIf { it.isNotBlank() }?.toBigDecimal(), percentThreshold.takeIf { it.isNotBlank() }?.toBigDecimal())
@@ -66,10 +66,26 @@ interface WatchDao {
     @Query("UPDATE instruments SET baselineKey = NULL, previous = NULL") suspend fun invalidateBaselines()
 }
 
-@Database(entities = [Watchlist::class, TrackedInstrument::class, Settings::class, Alert::class], version = 2, exportSchema = false)
+@Database(entities = [Watchlist::class, TrackedInstrument::class, Settings::class, Alert::class, EngineConfig::class, MarketSnapshot::class, HistoricalPrice::class, AnalysisResult::class, OpportunityEvent::class, ProviderHealth::class, EngineStatus::class, OpportunityAlertState::class], version = 3, exportSchema = false)
 abstract class WatchDatabase : RoomDatabase() {
     abstract fun dao(): WatchDao
+    abstract fun engineDao(): EngineDao
     companion object {
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS engine_config (id INTEGER NOT NULL PRIMARY KEY, fallbackUrls TEXT NOT NULL, holidays TEXT NOT NULL, exceptions TEXT NOT NULL, enabled INTEGER NOT NULL, minimumScore INTEGER NOT NULL, minimumConfidence REAL NOT NULL, cooldownMinutes INTEGER NOT NULL, materialChange INTEGER NOT NULL, dailyLimit INTEGER NOT NULL, quietStart TEXT NOT NULL, quietEnd TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS market_snapshots (fingerprint TEXT NOT NULL PRIMARY KEY, instrumentId TEXT NOT NULL, observedAt INTEGER NOT NULL, payload TEXT NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_market_snapshots_instrumentId ON market_snapshots(instrumentId)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS historical_prices (instrumentId TEXT NOT NULL PRIMARY KEY, fetchedAt INTEGER NOT NULL, payload TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS analyses (instrumentId TEXT NOT NULL PRIMARY KEY, fingerprint TEXT NOT NULL, analyzedAt INTEGER NOT NULL, ticker TEXT NOT NULL, name TEXT NOT NULL, quoteJson TEXT NOT NULL, resultJson TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS opportunity_events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, instrumentId TEXT NOT NULL, fingerprint TEXT NOT NULL, createdAt INTEGER NOT NULL, score INTEGER NOT NULL, state TEXT NOT NULL, ticker TEXT NOT NULL, name TEXT NOT NULL, quoteJson TEXT NOT NULL, resultJson TEXT NOT NULL, delivery TEXT NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_opportunity_events_instrumentId ON opportunity_events(instrumentId)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS provider_health (provider TEXT NOT NULL PRIMARY KEY, failures INTEGER NOT NULL, retryAt INTEGER NOT NULL, lastSuccess INTEGER, status TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS engine_status (id INTEGER NOT NULL PRIMARY KEY, lastAttempt INTEGER, lastSuccess INTEGER, lastFresh INTEGER, message TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS opportunity_state (instrumentId TEXT NOT NULL PRIMARY KEY, fingerprint TEXT NOT NULL, score INTEGER NOT NULL, state TEXT NOT NULL, createdAt INTEGER NOT NULL)")
+                db.execSQL("UPDATE settings SET freeFeeds=0")
+            }
+        }
         val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE instruments ADD COLUMN baselineKey TEXT")

@@ -29,7 +29,7 @@ class MigrationTest {
             old.execSQL("""INSERT INTO settings VALUES (1,0,15,'1,2,3,4,7','00:00','00:00',0,'','','','System',1)""")
             old.version = 1
         }
-        val db = Room.databaseBuilder(context, WatchDatabase::class.java, name).addMigrations(WatchDatabase.MIGRATION_1_2).build()
+        val db = Room.databaseBuilder(context, WatchDatabase::class.java, name).addMigrations(WatchDatabase.MIGRATION_1_2, WatchDatabase.MIGRATION_2_3).build()
         try {
             WatchRepository(db).initialize()
             val row = db.dao().getInstruments().single()

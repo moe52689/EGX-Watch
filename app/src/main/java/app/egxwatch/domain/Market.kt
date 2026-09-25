@@ -6,12 +6,12 @@ import java.time.*
 
 enum class InstrumentType { STOCK, ETF, FUND }
 enum class DataKind { LIVE, DELAYED, NAV, INDICATIVE }
-enum class TimestampBasis { EXCHANGE, VALUATION_DATE, PROVIDER_SNAPSHOT }
+enum class TimestampBasis { EXCHANGE, VALUATION_DATE, PROVIDER_SNAPSHOT, RETRIEVAL_TIME }
 data class Instrument(val id: String, val ticker: String, val name: String, val type: InstrumentType,
     val currency: String = "EGP", val source: String, val verifiedAt: String)
 data class Quote(val instrumentId: String, val value: BigDecimal, val currency: String,
     val kind: DataKind, val timestamp: Instant, val source: String, val delayMinutes: Int? = null,
-    val timestampBasis: TimestampBasis = TimestampBasis.EXCHANGE, val notice: String? = null)
+    val timestampBasis: TimestampBasis = TimestampBasis.EXCHANGE, val notice: String? = null, val fields: MarketFields = MarketFields())
 data class MarketStatus(val state: String, val detail: String, val timestamp: Instant?)
 
 interface MarketDataProvider {
@@ -57,14 +57,17 @@ fun shouldNotify(current: BigDecimal, previous: BigDecimal?, policy: MonitorPoli
         (policy.percentThreshold?.let { limit -> delta.percent?.abs()?.let { it >= limit } } == true)
 }
 fun validateQuote(instrument: Instrument, quote: Quote, now: Instant = Instant.now()) {
+    quote.fields.validate()
     require(quote.instrumentId == instrument.id) { "Quote belongs to a different instrument" }
     require(quote.currency == instrument.currency) { "Quote currency changed" }
     require(quote.value.signum() >= 0 && quote.value.precision() <= 24 && quote.value.scale() in 0..12) { "Invalid value" }
     require(quote.timestamp <= now.plusSeconds(300)) { "Quote timestamp is in the future" }
     require(quote.source.isNotBlank()) { "Missing data source" }
-    require((instrument.type == InstrumentType.FUND) == (quote.kind == DataKind.NAV)) { "Incorrect quote/NAV classification" }
-    require(quote.kind != DataKind.DELAYED || (quote.delayMinutes != null && quote.delayMinutes >= 0)) { "Missing delay" }
-    require(quote.kind != DataKind.INDICATIVE || quote.timestampBasis == TimestampBasis.PROVIDER_SNAPSHOT)
+    require(if (instrument.type == InstrumentType.STOCK) quote.kind != DataKind.NAV else
+        instrument.type == InstrumentType.ETF || quote.kind == DataKind.NAV) { "Incorrect quote/NAV classification" }
+    require(quote.kind != DataKind.DELAYED || (quote.delayMinutes != null && quote.delayMinutes in 0..1440)) { "Missing or invalid delay" }
+    require(quote.kind != DataKind.NAV || quote.timestampBasis in setOf(TimestampBasis.VALUATION_DATE, TimestampBasis.EXCHANGE)) { "NAV requires a valuation timestamp" }
+    require(quote.kind != DataKind.INDICATIVE || quote.timestampBasis in setOf(TimestampBasis.PROVIDER_SNAPSHOT, TimestampBasis.RETRIEVAL_TIME))
     require(quote.kind !in setOf(DataKind.LIVE, DataKind.DELAYED) || quote.timestampBasis == TimestampBasis.EXCHANGE)
 }
 fun BigDecimal.display(): String = stripTrailingZeros().toPlainString()

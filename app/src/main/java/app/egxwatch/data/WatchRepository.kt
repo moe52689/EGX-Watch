@@ -3,6 +3,11 @@ package app.egxwatch.data
 import androidx.room.withTransaction
 import app.egxwatch.domain.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
@@ -11,18 +16,38 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
     private val providerFactory: ((Settings) -> MarketDataProvider)? = null) {
     val dao = database.dao()
     private val mutex = Mutex()
-    private val freeProvider = FreePublicProvider(PublicFeedClient(feedCacheDirectory))
-    fun provider(settings: Settings): MarketDataProvider = when {
-        providerFactory != null -> providerFactory.invoke(settings)
-        settings.providerUrl.isNotBlank() -> GatewayProvider(settings.providerUrl)
-        settings.freeFeeds -> freeProvider
-        else -> DirectoryProvider()
+    private val checkMutex = Mutex()
+    @Volatile private var config=EngineConfig()
+    private var providerKey=""
+    private var configuredProvider:MarketDataProvider=DirectoryProvider()
+    var snapshotObserver:(suspend (Instrument,Quote,MarketDataProvider)->Unit)?=null
+    fun networkChanged() { /* Persisted rate-limit cooldown must survive network changes. */ }
+    @Synchronized fun provider(settings: Settings): MarketDataProvider {
+        providerFactory?.let { return it(settings) }
+        val urls=(listOf(settings.providerUrl)+config.urls()).filter { it.isNotBlank() }.distinct()
+        val key=urls.joinToString("\n")
+        if(key!=providerKey) {
+            configuredProvider=if(urls.isEmpty()) DirectoryProvider() else MarketDataRepository(urls.map { ProviderEndpoint(it,GatewayProvider(it)) },RoomHealthStore(database.engineDao()))
+            providerKey=key
+        }
+        return configuredProvider
+    }
+    suspend fun saveEngine(value:EngineConfig) {
+        value.rules(); value.urls();value.calendar(dao.getSettings() ?: Settings())
+        database.engineDao().save(value);config=value
     }
     suspend fun initialize() = mutex.withLock {
+        config=database.engineDao().config() ?: EngineConfig()
         database.withTransaction {
             if (dao.getSettings() == null) {
                 dao.save(Settings())
                 dao.insertList(Watchlist(name = "My EGX watchlist"))
+            }
+            val identities = DirectoryProvider.instruments.associateBy { it.id }
+            dao.getInstruments().forEach { row ->
+                identities[row.id]?.takeIf { it.currency == row.currency && it.type.name == row.type }?.let {
+                    if (row.ticker != it.ticker || row.name != it.name) dao.update(row.copy(ticker = it.ticker, name = it.name))
+                }
             }
         }
     }
@@ -36,6 +61,7 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
     }
     suspend fun save(settings: Settings) = mutex.withLock {
         settings.policy()
+        config.calendar(settings)
         if (settings.providerUrl.isNotBlank()) GatewayProvider.validateBaseUrl(settings.providerUrl)
         database.withTransaction {
             val old = dao.getSettings()
@@ -44,15 +70,22 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
         }
     }
     /** Serializes manual/background checks; records baseline and alert atomically. */
-    suspend fun check(background: Boolean, onlyIds: Set<String>? = null, deliver: suspend (Alert) -> String): Int = mutex.withLock {
+    suspend fun check(background: Boolean, onlyIds: Set<String>? = null, deliver: suspend (Alert) -> String): Int = checkMutex.withLock {
         val settings = dao.getSettings() ?: Settings()
         val policy = settings.policy()
-        if (background && (!settings.enabled || !policy.isActive(Instant.now()))) return@withLock 0
+        config=database.engineDao().config() ?: EngineConfig()
+        if (background && (!settings.enabled || !config.calendar(settings).isOpen(Instant.now()))) return@withLock 0
+        if(background && database.engineDao().status()?.lastAttempt?.let { Instant.now().toEpochMilli()-it < settings.interval*60000 }==true) return@withLock 0
+        database.engineDao().let { d -> d.status((d.status() ?: EngineStatus()).copy(lastAttempt=Instant.now().toEpochMilli(),message="Checking configured sources")) }
         val provider = provider(settings)
-        var count = 0
+        val count = java.util.concurrent.atomic.AtomicInteger()
         // One request/notification per instrument even when it belongs to several lists.
-        val baselineKey = "${settings.providerUrl}|${settings.freeFeeds}"
-        dao.getInstruments().filter { onlyIds == null || it.id in onlyIds }.groupBy { it.id }.values.forEach { tracked ->
+        val baselineKey = "${settings.providerUrl}|${settings.freeFeeds}|${config.fallbackUrls}"
+        if (provider is FreePublicProvider) provider.beginCheck()
+        try {
+        val slots = Semaphore(4)
+        coroutineScope {
+        dao.getInstruments().filter { onlyIds == null || it.id in onlyIds }.groupBy { it.id }.values.map { tracked -> async { slots.withPermit {
             val original = tracked.first()
             try {
                 val quote = provider.quote(original.instrument())
@@ -60,6 +93,8 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
                 val now = Instant.now().toString()
                 val pending = mutableListOf<Alert>()
                 database.withTransaction {
+                    val active = dao.getSettings() ?: Settings()
+                    require("${active.providerUrl}|${active.freeFeeds}|${(database.engineDao().config() ?: EngineConfig()).fallbackUrls}" == baselineKey) { "Provider changed during refresh. Please check again." }
                     for (row in tracked) {
                         val current = dao.getInstrument(row.listId, row.id) ?: continue
                         val oldTime = current.timestamp?.let(Instant::parse)
@@ -96,7 +131,8 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
                     val delivery = try { deliver(alert) } catch (e: SecurityException) { "Blocked by Android permission" }
                     dao.delivery(alert.id, delivery)
                 }
-                if (quote.notice == null) count++
+                if (quote.notice == null) count.incrementAndGet()
+                snapshotObserver?.invoke(original.instrument(),quote,provider)
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 database.withTransaction {
@@ -105,7 +141,15 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
                     } }
                 }
             }
+        } } }.awaitAll()
         }
-        count
+        database.engineDao().let { d -> database.withTransaction {
+            val previous=d.status() ?: EngineStatus()
+            d.status(previous.copy(lastSuccess=if(count.get()>0) Instant.now().toEpochMilli() else previous.lastSuccess,
+                message="${count.get()} instruments checked; saved data retained on failure"))
+            d.pruneProviders((listOf(settings.providerUrl)+config.urls()).filter { it.isNotBlank() })
+        } }
+        count.get()
+        } finally { if (provider is FreePublicProvider) provider.finishCheck() }
     }
 }

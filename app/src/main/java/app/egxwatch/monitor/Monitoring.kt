@@ -32,6 +32,7 @@ class AlertNotifier(private val context: Context) {
             "${alert.kind} • ${when (alert.timestampBasis) {
                 "VALUATION_DATE" -> "NAV date: " + java.time.Instant.parse(alert.dataTimestamp).atZone(java.time.ZoneId.of("Africa/Cairo")).toLocalDate() + " (time not published)"
                 "PROVIDER_SNAPSHOT" -> "Snapshot: ${alert.dataTimestamp}; exchange time unknown"
+                "RETRIEVAL_TIME" -> "Retrieved: ${alert.dataTimestamp}; trade time not supplied"
                 else -> "Data: ${alert.dataTimestamp}"
             }}\nSource: ${alert.source}"
         val intent = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java).putExtra("history", true),
@@ -57,7 +58,11 @@ class MonitorWorker(context: Context, params: WorkerParameters) : CoroutineWorke
     override suspend fun doWork(): Result {
         val app = applicationContext as WatchApplication
         app.repository.initialize()
-        app.repository.check(background = true) { app.notifier.send(it) }
+        val count = app.repository.check(background = true) { app.notifier.send(it) }
+        val settings = app.repository.dao.getSettings() ?: Settings()
+        val errors = app.repository.dao.getInstruments().mapNotNull { it.error }
+        if (count == 0 && runAttemptCount < 2 && settings.enabled && (app.database.engineDao().config() ?: EngineConfig()).calendar(settings).isOpen(java.time.Instant.now()) &&
+            errors.any { it.contains("resolve host", true) || it.contains("timeout", true) || it.contains("HTTP 5") || it.contains("connect", true) }) return Result.retry()
         // Per-instrument failures are persisted and retried at the next scheduled interval.
         return Result.success()
     }

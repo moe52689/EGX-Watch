@@ -1,100 +1,116 @@
-# Market-data gateway contract (v1)
+# Authorized market-data gateway contract · 1.3
 
-The Android client accepts a public HTTPS base URL in Settings, for example
-`https://market.example.org/v1/`. Credentials, tokens, query strings and fragments
-are rejected in that URL. Provider vendor keys must remain in server environment
-variables or a secret manager. The shipped app has no API key fields or embedded keys.
-For a private gateway, add short-lived user authentication as a separate feature;
-do not embed a reusable vendor key in this client.
+No live API entitlement, vendor key or gateway is bundled. To activate this app you
+must supply an HTTPS base URL implementing the routes below and obtain upstream rights
+covering EGX display, automated analytics and any redistribution. The Android client
+sends no vendor credential. Put upstream credentials in server environment secrets or a
+secret manager. Do not use a secret-bearing URL. Short-lived user authentication and
+backend deployment are future work; use only data your gateway is authorized to expose.
 
-Implement these four read-only routes. The client URL-encodes every path segment.
-Return non-2xx for unsupported instruments, missing data, quota errors or provider
-failures. Never return a zero or generated value to stand in for unavailable data.
-Responses must be JSON and at most 1 MiB. Search is limited to 500 matches.
+Settings accepts the primary URL; Analytics settings accepts two ordered fallback URLs.
+Every gateway must use the same canonical instrument IDs/currencies. Keep provider
+source labels stable. APIs may be changed behind the gateway without rewriting the app.
 
-## GET /instruments?q=search
+TLS certificate/hostname validation required. No redirects, URL user-info, query tokens
+or fragments. Response JSON maximum 1 MiB; 20-second call timeout. Return HTTP 429 with
+Retry-After (seconds or HTTP date) on quota exhaustion. Return non-2xx for missing data,
+never fictional values or zero as a substitute. Search results are limited to 500 per
+query; refine queries for larger universes. Routes are relative to your base URL.
 
-Return `{"instruments": [instrument, ...]}`. Query may be empty. Support ticker and
-full-name search across stocks, ETFs and funds. A result must have all fields below:
+## GET instruments?q=search and GET instruments/{id}
+
+Search returns `{"instruments":[instrument,...]}`; resolution returns one object.
+The app revalidates the selected ID/ticker/type/currency on addition. Example schema
+(identity only; these examples are documentation, not runtime responses):
 
 ```json
 {
-  "id": "EGX:CCAP",
-  "ticker": "CCAP",
-  "name": "Qalaa for Financial Investments",
-  "type": "STOCK",
-  "currency": "EGP",
-  "source": "Your identity directory source",
-  "verifiedAt": "2026-09-20",
-  "validated": true
+  "id":"EGX:CCAP", "ticker":"CCAP", "name":"Qalaa for Financial Investments",
+  "type":"STOCK", "currency":"EGP", "source":"Your authorized directory",
+  "verifiedAt":"2026-09-25", "validated":true
 }
 ```
 
-`type` is `STOCK`, `ETF` or `FUND`. `id` is your stable canonical ID (up to 160
-characters); `ticker` must be nonempty (up to 160, to accommodate provider fund codes), name up to 200, currency ISO-like
-three-letter uppercase. `verifiedAt` is an ISO date. Keep separate share classes
-and currencies under separate IDs. There is no client-side six-symbol allowlist
-for a gateway. To reuse built-in watchlist entries, support these IDs:
+Types STOCK/ETF/FUND; id and ticker max 160, name max 200, three uppercase currency
+letters, verifiedAt ISO date. Distinct share classes/currencies require distinct IDs.
+Existing built-in IDs: EGX:CCAP, EGX:BINV, EGX:EGX30ETF, EG:FUND:T70,
+EG:FUND:CTQ, EG:FUND:AZG, EG:FUND:BFA; other equities use EGX:ticker.
+Existing fund IDs include SNDUK:slug and AZIMUT:issuer-id. Resolve these to your vendor
+identifiers server-side; do not guess a ticker from a similar company name.
 
-| Symbol | ID | Type |
-|---|---|---|
-| CCAP | EGX:CCAP | STOCK |
-| BINV | EGX:BINV | STOCK |
-| T70 | EG:FUND:T70 | FUND |
-| CTQ | EG:FUND:CTQ | FUND |
-| AZG | EG:FUND:AZG | FUND |
-| BFA | EG:FUND:BFA | FUND |
-| EGX30ETF | EGX:EGX30ETF | ETF |
+## GET quotes/{id}
 
-## GET /instruments/{id}
+Required fields:
 
-Return one instrument object. This call runs again before adding a search result.
-The ID, ticker, currency and type must match the selected search result; the
-provider must affirm `validated: true`. An arbitrary typed string cannot bypass
-validation.
+| Field | Type / meaning |
+|---|---|
+| instrumentId | Same canonical identity |
+| value | Verified decimal string; max 24 significant digits / 12 decimal places |
+| currency | Must match the instrument |
+| kind | LIVE, DELAYED, NAV or INDICATIVE |
+| timestamp | Actual data ISO-8601 instant, never relabel a saved response as now |
+| source | Stable upstream provider/series label |
+| timestampBasis | EXCHANGE, VALUATION_DATE, PROVIDER_SNAPSHOT or RETRIEVAL_TIME |
+| delayMinutes | Required nonnegative integer for DELAYED |
+| open, previousClose, high, low, bid, ask | Optional decimal strings, omit if unavailable |
+| volume | Optional nonnegative integer, omit for unsupported NAV/quote feeds |
 
-## GET /quotes/{id}
+LIVE/DELAYED require EXCHANGE timestamps. INDICATIVE requires snapshot/retrieval basis
+and cannot generate opportunity assessments. Funds require NAV; ETF NAV is distinct
+from its traded exchange price. Date-only NAV: convert Africa/Cairo midnight on the
+valuation date to UTC and use VALUATION_DATE. Midnight is a storage convention, not an
+invented publication time. Never mix ETF iNAV with official NAV or exchange price.
 
-Return fields `instrumentId`, `value` (decimal string), `currency`, `kind`,
-`timestamp` (ISO-8601 instant), `source`, `timestampBasis`, and optional
-`delayMinutes`. Do not use fetch time as a trade timestamp.
+The snapshot envelope stores ticker/name from the validated instrument, all supplied
+fields and provider/data timestamp. Age/freshness and daily percentage change are derived
+on-device; daily change is unavailable without nonzero previousClose. Quote freshness is
+20 minutes plus declared exchange delay; NAV age allowance is four calendar days. This
+is a conservative local heuristic, not a verified fund publication schedule. Invalid or
+unverified timing yields UNAVAILABLE; old or cached/error-marked data yields STALE.
 
-| kind | Meaning | timestampBasis |
-|---|---|---|
-| LIVE | Provider-confirmed live exchange quote | EXCHANGE |
-| DELAYED | Exchange quote with known delay; delayMinutes required | EXCHANGE |
-| NAV | Published fund unit NAV, never a stock quote | VALUATION_DATE or EXCHANGE |
-| INDICATIVE | Price with unverified exchange timing/delay | PROVIDER_SNAPSHOT |
+## GET history/{id}
 
-For date-only NAVs, encode the valuation date at 00:00 in Africa/Cairo converted
-to UTC and set `timestampBasis: "VALUATION_DATE"`. The UI displays only the date
-with “time not published”; the encoded midnight is a storage convention, not a
-claimed publication time. NAV instrument type must be FUND. ETF values here are
-exchange quotes; do not send an ETF indicative NAV as its traded price.
+Returns a complete daily series on the **same price/NAV scale, currency, source and kind**
+as the selected quote. Use 60–1,000 completed observations. No polling snapshots may be
+silently relabelled as historical daily candles. Corporate-action adjustments must be
+comparable to the current price; `comparable:false` prevents analysis.
 
-The client rejects negative/oversized values, wrong identity/currency, missing
-source, future timestamps beyond 5 minutes, regressing timestamps, and a different
-value under an unchanged exchange/snapshot timestamp. Date-only NAV corrections
-can update the same valuation date. Preserve decimals (up to 24 significant digits
-and 12 decimal places). Old observations remain visible with their actual date
-and an age warning after 24 hours. They are never re-dated to “now”.
+Object fields:
 
-Changing the gateway URL or free-feed mode clears baselines. A changed quote
-source or kind also establishes a new baseline, preventing cross-source movement
-alerts. Source names should be stable, not include request-specific IDs.
+- instrumentId, currency, source, kind: match the quote.
+- comparable: boolean asserting the common adjustment/valuation basis.
+- asOf: timestamp of provider verification of this series, at most 24 hours old.
+- expectedDates: ordered ISO date array of **all expected completed observation dates**
+  in the returned span, using the provider's reliable exchange/publication calendar.
+- candles: ordered array containing date, close (number), optional open/high/low
+  (numbers) and volume (integer). Every expected date must have exactly one candle.
+  Only completed observations; never include an unfinished daily candle.
 
-## GET /market-status
+Do not fill holidays, suspensions or missing days with invented bars. Do not claim a
+series is complete by removing a missing date from expectedDates. NAV observations may
+have a different publication calendar than equities. The client verifies exact coverage,
+ordering, identity, values and timestamp bounds. Latest bar must be no more than seven
+calendar days old; longer legitimate suspensions currently yield insufficient data.
+Discontinuities over 50% are rejected pending adjusted data. This is deliberately
+conservative, not an automatic corporate-action detector.
 
-Return `state` (`OPEN`, `CLOSED`, `HALTED`, `UNKNOWN`), explanatory `detail` and
-ISO-8601 `timestamp`. Obtain holiday/exception information from your provider.
-The app does not infer an authoritative open status from a weekday clock.
+History is reused for up to one hour per series; snapshot fingerprints suppress repeated
+analytics. Successful source/series changes invalidate history reuse. History failure
+never erases a successfully retrieved quote and cannot produce an opportunity alert.
 
-## Implementing another provider
+## GET market-status
 
-`MarketDataProvider` is the boundary; implement `search`, `resolve`, `quote` and
-`marketStatus`, then select it in `WatchRepository.provider`. Neither Compose
-screens nor the WorkManager worker knows about HTTP schemas. `GatewayProvider`
-supports server-side vendor substitution without an APK update when this contract
-remains stable. `FreePublicProvider` demonstrates three source adapters with
-fail-closed parsing and timestamp classification. Tests inject a provider into
-the repository without using a network or shipping fictional values.
+Return state OPEN/CLOSED/HALTED/UNKNOWN, detail and timestamp. This is an observed status,
+not a full future calendar. The currently implemented monitoring calendar is **locally
+editable**: weekly days/windows, holiday dates, exceptional date windows. A remote
+calendar endpoint is not silently assumed to exist. Backend calendar synchronization
+is a recommended next step.
+
+## Backend monitoring boundary
+
+A future service can use the same quote/history/directory contract independently of
+handset execution, maintain entitlement-aware polling, and deliver push events with
+immutable data timestamps. It should own upstream rate limits, secrets, official
+calendar ingestion and adjusted-history quality. The APK does not currently deploy a
+backend, use FCM, call an LLM or obtain data licenses. StructuredExplanationEngine
+currently explains QuantitativeEngine's reproducible features locally.

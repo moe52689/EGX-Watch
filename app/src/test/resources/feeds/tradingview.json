@@ -1,0 +1,44 @@
+{
+  "totalCount": 3,
+  "data": [
+    {
+      "s": "EGX:CCAP",
+      "d": [
+        "CCAP",
+        "QALA For Financial Investments",
+        "EGP",
+        "stock",
+        "EGX",
+        7.21,
+        "delayed_streaming_900",
+        null
+      ]
+    },
+    {
+      "s": "EGX:EGBE",
+      "d": [
+        "EGBE",
+        "Egyptian Gulf Bank",
+        "USD",
+        "stock",
+        "EGX",
+        0.518,
+        "delayed_streaming_900",
+        null
+      ]
+    },
+    {
+      "s": "EGX:COMI",
+      "d": [
+        "COMI",
+        "Commercial International Bank - Egypt (CIB) S.A.E.",
+        "EGP",
+        "stock",
+        "EGX",
+        131.5,
+        "delayed_streaming_900",
+        null
+      ]
+    }
+  ]
+}

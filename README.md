@@ -1,149 +1,150 @@
-# EGX Watch
+# EGX Watch 1.3.0 · build 4
 
-A native Kotlin Android market monitor for Egyptian stocks, ETFs and investment
-funds. Material 3, Jetpack Compose, ViewModel/StateFlow, Room and WorkManager.
-Android 8.0 (API 26) or newer. Dark, light and system themes.
+Kotlin / Compose Material 3 / Room / Coroutines and Flow / WorkManager.
+Android 8.0+ (API 26). This extends the existing application, including the pending
+1.2 reliability and interface improvements; existing watchlists and observations migrate.
+New installations have an empty watchlist.
 
-## Install the debug APK
+## Install
 
-The local deliverable is `artifacts/EGX-Watch-debug.apk`. On GitHub, open the
-**Actions → Android build and tests** successful run and download **EGX-Watch-debug**,
-then unzip the artifact. Build artifacts are intentionally not committed to Git.
-
-1. Copy the APK to your Android phone and open it.
-2. Allow “Install unknown apps” for the file manager/browser you use, if prompted.
-3. Install **EGX Watch**. This is a development-signed debug build.
-4. Open **Discover**, search or browse, and add your chosen instruments. New installs
-   start with an **empty watchlist**. Adding an instrument fetches its latest published
-   value automatically. Free feeds are enabled; background monitoring starts paused.
-5. In **Settings**, allow notifications, choose monitoring days/times and interval,
-   enable background monitoring, then tap **Save settings**.
-
-With USB debugging enabled, installation can also be done with:
+Use `artifacts/EGX-Watch-v1.3.0-build4-2026-09-25-debug.apk`, or the identical
+`artifacts/EGX-Watch-debug.apk`. Copy to the phone, open it, allow installation
+from that file manager if prompted, and install. Install over the previous locally
+signed APK to retain data. This is a development-signed, debuggable build.
 
 ```sh
-adb install -r artifacts/EGX-Watch-debug.apk
+adb install -r artifacts/EGX-Watch-v1.3.0-build4-2026-09-25-debug.apk
 adb shell am start -n app.egxwatch/.MainActivity
 ```
 
-Updating an existing app requires the same debug signing key. A build from a
-different machine/CI may need the old app uninstalled first, which removes local
-watchlists and history. No provider credentials are needed for the free feeds.
+A CI/machine using a different signing key cannot upgrade this installation.
+Do not uninstall to resolve that without first considering that local data will be lost.
+APKs are ignored by Git; Actions also builds downloadable debug artifacts.
 
-## What is included
+## Data connection is required
 
-- Multiple named watchlists with validated additions and removal; stocks, ETFs and
-  funds may be mixed in a single list. Each shows ticker, full name and type.
-- Empty initial watchlist, with searchable names/codes and stock/fund/ETF filters.
-  The bundled identity catalogue contains **296 stocks, 153 funds and one ETF**.
-  Refresh directory updates identities from public sources. Existing selections
-  survive upgrades. CCAP, BINV, T70, CTQ, AZG and BFA remain available to choose.
-- Public free feeds: broad indicative stock snapshots and published fund NAVs.
-  The checked stock response matched **246 of the 296 stock identities**; directory
-  membership does not guarantee a free price. Unsupported values show unavailable.
-  Funds without a verified short ticker display their provider code and full name.
-  [Coverage, sources and limitations](docs/FREE_FEEDS.md) are explicit. No random,
-  demo or hard-coded prices are used at runtime.
-- Separate **LIVE**, **DELAYED**, **INDICATIVE**, and **NAV** labels. Unknown
-  exchange timing is never advertised as live. Date-only NAVs do not claim a time.
-  Stale values keep their source timestamp and an older-observation label.
-- WorkManager intervals: 15 min, 30 min, 1 hour, 2 hours, or custom 15–525600 min.
-  Monitoring days/windows use Africa/Cairo, including DST. Equal start/end means
-  all day; overnight windows belong to their starting day. Times are HH:mm.
-- Change notifications show ticker, full name, current price/NAV, previous value,
-  signed absolute and percentage changes, source and data timestamp/date.
-- Global and per-instrument absolute/percentage thresholds; either threshold
-  triggers. Blank per-instrument rules inherit global rules. Comparison is against
-  the **previous successful check**, not a daily close or last alerted value.
-- Optional notification on every successful check, including unchanged values;
-  this overrides thresholds. Initial values otherwise establish a quiet baseline.
-  Percentage is N/A when the previous value is zero or unavailable.
-- Latest 500 alert records persist locally, including blocked-notification status.
-  Offline/provider errors retain the last real value, source and data timestamp,
-  including after restarts or changing providers. Validated public responses are
-  also cached on disk. Failed refreshes never generate movement/every-check alerts.
-  Duplicate instruments across lists produce one notification per check.
-- **Settings → Test connection** fetches and validates real observations from
-  each free source and shows individual diagnostics; it does not merely search
-  the local directory. Opening the app refreshes existing selections automatically.
-- Market status from a connected gateway; Unknown for free feeds because they do
-  not verify the exchange calendar. No fabricated holiday/open-status claims.
+**No authorized live EGX feed or historical API has been supplied.** The app now
+uses an explicitly configured HTTPS gateway, with up to two fallback gateways.
+It never substitutes mock prices. Existing saved values keep their original timestamps.
+The existing offline identity catalogue has 296 stocks, 167 funds and one ETF;
+it is not a complete, permanently current register of every Egyptian financial product.
+Gateway search can validate and add other instruments without changing application code.
 
-Android may delay periodic work due to Doze, battery restrictions or no network;
-15 minutes is a minimum interval, **not an exact alarm**. Force-stopping the app
-prevents background execution until it is opened again. Manual checks ignore
-monitoring windows and can generate alerts using the same rules.
+TradingView prohibits automated collection and non-display usage. Its undocumented
+screener is therefore disabled. Other undocumented website feeds are not assumed to
+have analytics/redistribution permission. The old free-feed preference is migrated off
+and cannot activate these sources. Historical parser fixtures remain test-only.
+See [source policy](docs/FREE_FEEDS.md).
 
-## Connect a different provider
+To activate data, provide an **authorized HTTPS gateway base URL** implementing
+[the provider contract](docs/PROVIDER_CONTRACT.md). Vendor credentials stay on that
+server. Required routes: instrument search/validation, quotes, daily history and
+market status. No vendor key should be pasted into the Android app or committed.
+There is no external LLM or paid data integration configured.
 
-Enter a public HTTPS gateway base URL under Settings, test it, and save. A gateway
-takes priority over free feeds. To restore free feeds, clear the URL and enable
-the free-feeds switch. Switching sources resets comparison baselines to avoid
-false changes while keeping the latest saved value visible.
+## Using the app
 
-See the [provider contract](docs/PROVIDER_CONTRACT.md). All vendor credentials stay
-on your gateway server. The app rejects URLs containing embedded credentials or
-query tokens; it contains no API keys. Android cleartext traffic is disabled.
-Only the selected provider receives search queries and requested instrument IDs.
-No analytics SDK is included. Local data and history are not cloud-synced.
+1. Discover: choose stocks, ETFs or funds, search by ticker/name and validate/add.
+   Offline validation is against saved identities, not an assertion of current listing.
+2. Settings: enter the primary authorized gateway URL and test the connection.
+3. Settings → Analytics, fallbacks & calendar: configure fallback URLs, local holidays
+   and exceptional session windows. Holidays override the weekly window.
+4. Choose monitoring days and Cairo times, enable monitoring and save. Defaults on
+   new installs are Sun–Thu, 10:00–14:30, every 15 minutes; confirm them for the session
+   you intend to monitor. Existing user windows remain unchanged.
+5. Enable Android notifications and, separately, opportunity notifications. Defaults:
+   score 75, coverage confidence 0.70, 60-minute per-security cooldown, 10-point
+   material change, 10 alerts/day, quiet 22:00–08:00 Cairo.
+6. Watchlist → instrument → Explore analysis & risks shows reproducible indicators,
+   score components, drivers, risks, provider and timestamps. Status shows provider
+   health/cooldowns, monitoring activity, network and Android restrictions.
+7. History retains price alerts and opportunity events, including delivery status.
+
+## What the engine does
+
+- Ordered provider failover on timeout, invalid response, rate limit or stale data;
+  persistent exponential backoff with jitter and Retry-After handling. TLS certificate
+  and hostname checks remain enabled. Responses and request durations are bounded.
+- Latest saved values remain visible after errors/restarts. LIVE, DELAYED, STALE and
+  UNAVAILABLE quality states accompany the original quote/NAV classification.
+  NAV valuations and indicative retrieval timestamps are never exchange live quotes.
+- Snapshot fingerprints include timestamp, normalized decimals, provider and market
+  fields. Unchanged snapshots skip historical fetches, analytics and opportunity alerts.
+- Deterministic SMA/EMA, RSI, MACD, Bollinger bands, ATR when OHLC exists, volatility,
+  momentum, support/resistance, volume confirmation, drawdown and range reward/risk.
+  Volume comparisons use completed daily observations, never partial intraday volume
+  against a full day's average. At least 60 comparable completed observations required.
+- Explainable weighted trend/momentum/risk/volume score. Missing valuation, news and
+  market context are disclosed, not invented. Confidence is **data coverage**, not a
+  calibrated likelihood of profit. These heuristic signals are not individualized advice.
+- Opportunity notifications require an eligible session, quality history, thresholds,
+  a meaningful increase in state or material score change, cooldown, quiet-hours and
+  daily-limit checks. State persists independently of the bounded event history.
+- Existing price/NAV change thresholds and explicit every-check alerts remain separate.
+  Those optional every-check alerts are not opportunity notifications.
+
+## Background limits
+
+WorkManager runs at intervals of 15 minutes or longer (15/30/60/120/custom). It is
+inexact and affected by Doze, network availability, battery restrictions and force-stop.
+The visible app also checks at the configured interval; a shared timestamp prevents
+normal foreground/background polling more often than the interval. Manual refresh is
+explicit and may run outside the session, but cannot emit opportunity alerts there.
+Off-session scheduled work performs no normal quote polling; it resumes on an eligible
+subsequent Android execution. No foreground service or exact-alarm workaround is used.
+
+The locally editable calendar supports holidays and date-specific windows. No reliable
+remote holiday source is configured; the UI distinguishes a configured window from
+verified exchange status. Next-check time is an eligibility estimate, not an alarm.
+A backend monitor is the next step for dependable independent intraday monitoring and
+push delivery. No shorter-interval provider contract is configured, so sub-15-minute
+polling is deliberately unavailable.
 
 ## Build and test
 
-Requirements: JDK 17, Android SDK platform 35 and build-tools 35.0.0. Gradle 8.13
-is pinned in the wrapper. Set `ANDROID_HOME` or an ignored `local.properties`
-with `sdk.dir`. Open the root in Android Studio, or run:
+Requirements: JDK 17, Android SDK 35/build-tools 35.0.0; Gradle 8.13 wrapper.
+Set ANDROID_HOME or ignored local.properties with sdk.dir.
 
 ```sh
-./gradlew testDebugUnitTest lintDebug assembleDebug
-# Windows: .\gradlew.bat testDebugUnitTest lintDebug assembleDebug
-```
-
-Output: `app/build/outputs/apk/debug/app-debug.apk`.
-
-Run Room/repository and Compose UI tests on a connected API 26+ device/emulator:
-
-```sh
+./gradlew assembleDebug testDebugUnitTest lintDebug
 ./gradlew connectedDebugAndroidTest
-# Optional real-source checks (requires internet; upstream availability can vary):
-./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.liveFeeds=true
+# Windows: .\gradlew.bat with the same arguments
 ```
 
-Unit tests cover monetary precision, inclusive thresholds, zero baselines,
-overnight/day boundaries, Cairo timezone, provider identity and timestamp
-validation, actual public-feed response parsing and schema/currency failures.
-Instrumented tests cover atomic baselines/history, duplicate watchlists, errors,
-old observations, provider changes, threshold overrides and navigation.
+APK: `app/build/outputs/apk/debug/app-debug.apk`. Instrumentation requires an API 26+
+emulator/device and uses isolated test databases; the UI smoke test resets the test
+app's local database. **Do not run the instrumentation suite against personal app data.**
+Tests use mocked providers and captured parser fixtures; no live market API is needed.
+See [verification](docs/VERIFICATION.md) for the actual executed checks.
 
-Manual acceptance checklist:
+Manual acceptance: install over the prior local APK; confirm retained selections and
+values, source timestamps and empty new-install watchlist. Configure an authorized
+provider and check healthy/failing/stale primary and fallback responses. Verify history
+is insufficient until valid daily bars arrive; repeated identical snapshots must not
+create opportunity events. Exercise quiet hours, thresholds, holidays, offline recovery,
+light/dark themes, notification taps and overnight/background behavior on the target phone.
 
-1. On a fresh install, verify the watchlist is empty. Add CCAP, BINV, T70, CTQ,
-   AZG and BFA in Discover; verify values load automatically with source/date labels.
-2. Search COMI or a full company name, use type filters, and add to a list. Added
-   entries disable the add button; duplicate addition is also rejected by storage.
-3. Create a second watchlist and add an ETF/fund alongside a stock. Unknown symbols
-   must show no matches; configure a gateway to validate symbols outside the free directory.
-4. Open details, set a positive threshold, save it, then return to the watchlist.
-5. Try custom interval 14, empty days or invalid time: saving must be rejected.
-6. Allow notifications and enable every-check mode. Refresh twice; history should
-   record successful checks even when a NAV has not changed. Revoke notification
-   permission and repeat: history records the blocked delivery.
-7. Enable monitoring with an active Cairo window, close the app normally, and allow
-   at least one chosen interval plus possible Android scheduling delay.
-8. Turn network access off and refresh. Existing values retain their timestamps;
-   errors appear without zeroing values or producing movement alerts.
-9. Restart the app and switch light/dark themes; watchlists, rules and history persist.
-10. Run Test connection to inspect each source. Switch providers and confirm the
-    saved values remain visible. Upgrade a prior installation without uninstalling:
-    existing selections and observations must survive.
+## Architecture and next milestone
 
-To regenerate the bundled identity metadata, run `scripts/update-catalog.ps1`
-with internet access. It captures names, currencies and identities only; downloaded
-prices are never bundled into the app. Review the resulting metadata before committing.
+The original WatchRepository owns watchlists and baseline price alerts. MarketDataRepository
+wraps replaceable providers with health/failover; GatewayProvider implements the HTTPS
+contract. AnalyticsRepository orchestrates quality gates, QuantitativeEngine and atomic
+Room persistence; StructuredExplanationEngine implements AIInterpretationEngine locally.
+OpportunityNotificationManager only delivers already-qualified events. ViewModels expose
+Room Flows to Compose. Manual dependency injection remains in WatchApplication.
 
-## Structure
+Room v3 migration preserves existing tables and adds snapshots, historical series,
+analyses, events, alert state, provider health and engine configuration/status. Keep at
+most 5,000 snapshots, 1,000 bars/security and 500 events of each notification type;
+removed instruments' history/analysis are pruned during checks. No unrelated messaging
+or personal information enters the market database. Backup remains disabled.
 
-`domain/` owns provider-independent types, validation, schedule and alert rules.
-`data/` owns Room persistence, public/gateway adapters and serialized monitoring.
-`monitor/` owns WorkManager scheduling and Android notifications. The Compose UI
-observes database flows through `WatchViewModel`. Synthetic tests are isolated
-from production providers. The existing GPL-3.0 repository license is retained.
+Remaining limits: no authorized live feed/backend deployment, no provider authentication
+flow in the handset, no remote holiday synchronizer, no external LLM, no fundamentals/news,
+no calibrated/backtested return model, no guarantee of complete directory coverage or
+phone scheduling. The next milestone is a licensed backend pilot with validated EGX
+corporate-action-adjusted history, official calendar, monitoring and push delivery,
+followed by out-of-sample evaluation and device battery testing.
+
+[Development plan](docs/ENGINE_PLAN.md) · [Security/operations](docs/SECURITY_OPERATIONS.md)
+· [Implementation file map](docs/ENGINE_FILES.md). Repository GPL-3.0 license retained.

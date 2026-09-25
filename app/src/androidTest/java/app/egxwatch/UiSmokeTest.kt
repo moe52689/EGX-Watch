@@ -10,9 +10,14 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class UiSmokeTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+    @org.junit.Before fun resetTestStorage() = kotlinx.coroutines.runBlocking {
+        val app = rule.activity.application as WatchApplication
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { app.database.clearAllTables() }
+        app.repository.initialize()
+    }
     @Test fun mainNavigationAndInstrumentValidationAreVisible() {
         rule.onNodeWithText("EGX Watch").assertIsDisplayed()
-        rule.onNodeWithText("0 instruments").assertIsDisplayed()
+        rule.waitUntil(10000) { runCatching { rule.onNodeWithText("0 instruments").assertIsDisplayed() }.isSuccess }
         rule.onNodeWithText("Discover").performClick()
         rule.onNodeWithText("Ticker or full name").performTextInput("CCAP")
         rule.onNodeWithText("Ticker or full name").performImeAction()
@@ -23,11 +28,15 @@ class UiSmokeTest {
         rule.waitUntil(10000) { rule.onAllNodesWithText("Added").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Added").assertIsNotEnabled()
         rule.onNodeWithText("Watchlist").performClick()
-        rule.onNodeWithText("1 instruments").assertIsDisplayed()
+        rule.waitUntil(10000) { runCatching { rule.onNodeWithText("1 instruments").assertIsDisplayed() }.isSuccess }
         rule.onNodeWithText("History").performClick()
         rule.onNodeWithText("Your notification history").assertIsDisplayed()
         rule.onNodeWithText("Settings").performClick()
         rule.onNodeWithText("Data connection").assertIsDisplayed()
-        rule.onNodeWithText("Use free public feeds").assertIsDisplayed()
+        rule.onNodeWithText("Analytics, fallbacks & calendar").performClick()
+        rule.onNodeWithText("Analytics & calendar").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Back").performClick()
+        rule.onNodeWithText("Status").performClick()
+        rule.onNodeWithText("Monitoring status").assertIsDisplayed()
     }
 }

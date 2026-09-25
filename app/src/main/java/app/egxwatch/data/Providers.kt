@@ -33,7 +33,7 @@ class DirectoryProvider : MarketDataProvider {
         val instruments: List<Instrument> by lazy { (referenceInstruments + InstrumentCatalog.bundled).distinctBy { it.id }.sortedBy { it.ticker } }
     }
     override suspend fun search(query: String) = instruments.filter {
-        it.ticker.contains(query.trim(), true) || it.name.contains(query.trim(), true)
+        it.ticker.contains(query.trim(), true) || it.name.contains(query.trim(), true) || it.id.contains(query.trim(), true)
     }
     override suspend fun resolve(id: String) = instruments.singleOrNull { it.id == id }
         ?: throw IOException("Instrument is not in the verified directory. Connect a provider to search more instruments.")
@@ -42,7 +42,7 @@ class DirectoryProvider : MarketDataProvider {
 }
 
 /** Provider credentials belong to the server. This client only stores a public HTTPS base URL. */
-class GatewayProvider(baseUrl: String) : MarketDataProvider {
+class GatewayProvider(baseUrl: String) : HistoricalMarketDataProvider {
     private val base = validateBaseUrl(baseUrl).toHttpUrl()
     private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS).callTimeout(20, TimeUnit.SECONDS)
@@ -53,16 +53,32 @@ class GatewayProvider(baseUrl: String) : MarketDataProvider {
             path.forEach { addPathSegment(it) }
             query?.let { addQueryParameter("q", it) }
         }.build()
-        client.newCall(Request.Builder().url(url).header("Accept", "application/json").build()).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Provider returned HTTP ${response.code}. Check connection and coverage.")
-            val body = response.body ?: throw IOException("Empty provider response")
-            val source = body.source()
-            source.request(1_048_577)
-            val bytes = source.buffer.readByteArray()
-            require(bytes.size <= 1_048_576) { "Provider response too large" }
-            JSONObject(String(bytes, Charsets.UTF_8))
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            val call=client.newCall(Request.Builder().url(url).header("Accept", "application/json").build())
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object:okhttp3.Callback {
+                override fun onFailure(call:okhttp3.Call,e:IOException) { if(continuation.isActive) continuation.resumeWith(Result.failure(IOException("Provider connection failed",e))) }
+                override fun onResponse(call:okhttp3.Call,response:okhttp3.Response) {
+                    try {
+                        val value=response.use {
+                            if(!it.isSuccessful) {
+                                val retry=it.header("Retry-After")?.let { value -> value.toLongOrNull() ?: runCatching {
+                                    java.time.Duration.between(Instant.now(),java.time.ZonedDateTime.parse(value,java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).seconds
+                                }.getOrNull() }
+                                throw ProviderHttpException(it.code,retry)
+                            }
+                            val source=(it.body ?: throw IOException("Empty response")).source()
+                            source.request(1_048_577)
+                            require(source.buffer.size<=1_048_576) { "Provider response too large" }
+                            JSONObject(source.buffer.readUtf8())
+                        }
+                        if(continuation.isActive) continuation.resumeWith(Result.success(value))
+                    } catch(e:Exception) { if(continuation.isActive) continuation.resumeWith(Result.failure(e)) }
+                }
+            })
         }
     }
+    override suspend fun history(instrument:Instrument)=EngineJson.history(get("history",instrument.id))
     override suspend fun search(query: String): List<Instrument> {
         val array = get("instruments", query = query.trim()).getJSONArray("instruments")
         require(array.length() <= 500) { "Too many search results; refine your query" }
@@ -100,6 +116,9 @@ class GatewayProvider(baseUrl: String) : MarketDataProvider {
         fun parseQuote(json: JSONObject) = Quote(json.getString("instrumentId"), json.getString("value").toBigDecimal(),
             json.getString("currency"), DataKind.valueOf(json.getString("kind")), Instant.parse(json.getString("timestamp")),
             json.getString("source"), if (json.has("delayMinutes") && !json.isNull("delayMinutes")) json.getInt("delayMinutes") else null,
-            TimestampBasis.valueOf(json.optString("timestampBasis", "EXCHANGE")))
+            TimestampBasis.valueOf(json.optString("timestampBasis", "EXCHANGE")), json.optString("notice").takeIf { it.isNotBlank() },
+            MarketFields(decimal(json,"open"),decimal(json,"previousClose"),decimal(json,"high"),decimal(json,"low"),
+                if(json.has("volume") && !json.isNull("volume")) json.getLong("volume") else null,decimal(json,"bid"),decimal(json,"ask")))
+        private fun decimal(json:JSONObject,key:String)=if(json.has(key) && !json.isNull(key)) json.getString(key).toBigDecimal() else null
 }
 }

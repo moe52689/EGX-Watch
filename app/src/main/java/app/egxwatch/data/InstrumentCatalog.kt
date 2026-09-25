@@ -18,7 +18,7 @@ object InstrumentCatalog {
         val body = checkNotNull(javaClass.getResourceAsStream("/instrument-catalog.json")) { "Bundled catalogue missing" }
             .bufferedReader().use { it.readText() }
         val array = JSONObject(body).getJSONArray("instruments")
-        (0 until array.length()).map { GatewayProvider.parseInstrument(array.getJSONObject(it)) }
+        (0 until array.length()).map { FundDirectory.decorate(GatewayProvider.parseInstrument(array.getJSONObject(it))) }
     }
     fun stocks(body: String, verified: String = LocalDate.now().toString()): List<Instrument> {
         val root = JSONObject(body)
@@ -48,7 +48,7 @@ object InstrumentCatalog {
     fun funds(body: String, verified: String = LocalDate.now().toString()): List<Instrument> {
         val result = fundRows(body).mapNotNull { (slug, name, cells) ->
             val currency = Regex("\\b(EGP|USD|EUR|GBP)\\b").find(cells[3].text())?.value ?: return@mapNotNull null
-            Instrument(fundId(slug), fundAliases[slug] ?: slug, name, InstrumentType.FUND, currency,
+            Instrument(fundId(slug), fundAliases[slug] ?: FundDirectory.codes[slug] ?: slug, name, InstrumentType.FUND, currency,
                 "https://snduk.com/eg/funds/$slug?lang=en", verified)
         }.distinctBy { it.id }
         require(result.isNotEmpty()) { "Fund directory unavailable or format changed" }

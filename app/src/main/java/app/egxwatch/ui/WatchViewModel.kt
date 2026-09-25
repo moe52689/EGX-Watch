@@ -7,12 +7,20 @@ import app.egxwatch.WatchApplication
 import app.egxwatch.data.*
 import app.egxwatch.domain.*
 import app.egxwatch.monitor.MonitorScheduler
+import app.egxwatch.monitor.connectivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as WatchApplication
     private val repository = app.repository
+    val analyses = app.database.engineDao().analyses().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val opportunities = app.database.engineDao().events().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val engineConfig = app.database.engineDao().configFlow().map { it ?: EngineConfig() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), EngineConfig())
+    val engineStatus = app.database.engineDao().statusFlow().map { it ?: EngineStatus() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), EngineStatus())
+    val providerHealth = app.database.engineDao().healthFlow().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    fun saveEngine(value:EngineConfig) = run { repository.saveEngine(value); message.value="Analytics and calendar settings saved" }
+    fun autoCheck() = run { repository.check(true) { app.notifier.send(it) } }
     val lists = repository.dao.lists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val instruments = repository.dao.instruments().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val settings = repository.dao.settings().map { it ?: Settings() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Settings())
@@ -21,6 +29,16 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     val message = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
     val searching = MutableStateFlow(false)
+    val online = connectivity(application).map<Boolean, Boolean?> { it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val refreshingIds = MutableStateFlow<Set<String>>(emptySet())
+    fun reconnected() { repository.networkChanged(); autoCheck() }
+    fun retry(id: String) = run {
+        if (id in refreshingIds.value) return@run
+        refreshingIds.value += id
+        try { repository.check(false, setOf(id)) { app.notifier.send(it) } }
+        finally { refreshingIds.value -= id }
+    }
     val directoryStatus = MutableStateFlow("Saved directory · choose what appears in your watchlist")
     val refreshingDirectory = MutableStateFlow(false)
     val connectionReport = MutableStateFlow<String?>(null)
@@ -28,7 +46,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     val market = MutableStateFlow(MarketStatus("Unknown", "Exchange status has not been checked.", null))
     private var searchJob: Job? = null
     private var currentQuery = ""
-    init { run { repository.initialize(); refreshMarket(); check(); refreshDirectory() } }
+    init { run { repository.initialize(); autoCheck() } }
     private fun run(action: suspend () -> Unit) = viewModelScope.launch {
         try { action() } catch (e: CancellationException) { throw e } catch (e: Exception) { message.value = e.message ?: "Something went wrong" }
     }
@@ -45,7 +63,9 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     fun add(list: Long, instrument: Instrument) = run {
         repository.add(list, instrument)
         message.value = "${instrument.ticker} added · fetching latest published value"
-        repository.check(false, setOf(instrument.id)) { app.notifier.send(it) }
+        refreshingIds.value += instrument.id
+        try { repository.check(false, setOf(instrument.id)) { app.notifier.send(it) } }
+        finally { refreshingIds.value -= instrument.id }
     }
     fun refreshDirectory() {
         if (refreshingDirectory.value) return
@@ -80,7 +100,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             val provider = repository.provider(Settings(providerUrl = url, freeFeeds = freeFeeds))
             connectionReport.value = when (provider) {
                 is FreePublicProvider -> provider.health()
-                is DirectoryProvider -> "Offline directory only. Enable free feeds or configure a gateway for values."
+                is DirectoryProvider -> "Offline identity directory. Configure an authorized gateway for prices and history."
                 else -> {
                     val instrument = provider.resolve(provider.search("CCAP").first().id)
                     val quote = provider.quote(instrument)
@@ -99,7 +119,8 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             busy.value = true
             try {
                 val count = repository.check(false) { app.notifier.send(it) }
-                message.value = "$count instrument(s) updated. See each instrument for availability."
+                val total = repository.dao.getInstruments().map { it.id }.distinct().size
+                if (total > 0) message.value = "$count of $total checked successfully · saved values kept for unavailable sources"
                 refreshMarket()
             } finally { busy.value = false }
         }
