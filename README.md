@@ -67,6 +67,10 @@ See the [source matrix](docs/SOURCE_MATRIX_2026-09-27.md) and
 
 ## Data providers and free-feed limits
 
+The [Twelve Data, Alpha Vantage and Finnhub review](docs/EGX_PROVIDER_REVIEW_2026-09-27.md)
+records coverage, timestamp, quota and licensing blockers. None is enabled as an EGX
+feed: no authenticated current Egyptian quote or fund NAV was verified.
+
 For EGX, supply a legitimate HTTPS gateway implementing
 [the current-price provider contract](docs/PROVIDER_CONTRACT.md): search, validation,
 quote and market status. **A historical endpoint is not required.** No secret vendor
