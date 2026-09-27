@@ -351,6 +351,7 @@ fun WatchApp(openGold:Boolean=false, openHistory: Boolean = false, openAnalysisI
             Text("Connect an authorized HTTPS gateway for verified current prices. Saved observations remain visible offline.", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick=onEngine) { Text("Analytics, fallbacks & calendar") }
             Text("Website feeds are disabled pending authorized API access. Provider API keys belong on your gateway server.", style = MaterialTheme.typography.bodySmall) }
+        item { TickerWebsitePicker() }
         item { OutlinedTextField(draft.providerUrl, { draft = draft.copy(providerUrl = it.trim()) }, Modifier.fillMaxWidth(),
             label = { Text("Provider base URL") }, placeholder = { Text("https://your-server.example/v1/") }, singleLine = true)
             TextButton(onClick = { vm.testConnection(draft.providerUrl, draft.freeFeeds) }, enabled = !testingConnection) { Text(if (testingConnection) "Testing feeds…" else "Test connection") } }
