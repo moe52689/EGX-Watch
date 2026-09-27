@@ -8,7 +8,7 @@ import kotlinx.coroutines.*
 
 class WatchApplication : Application() {
     val database by lazy { Room.databaseBuilder(this, WatchDatabase::class.java, "egx-watch.db")
-        .addMigrations(WatchDatabase.MIGRATION_1_2, WatchDatabase.MIGRATION_2_3, ForwardMigrations.FROM_3, ForwardMigrations.FROM_4).build() }
+        .addMigrations(WatchDatabase.MIGRATION_1_2, WatchDatabase.MIGRATION_2_3, ForwardMigrations.FROM_3, ForwardMigrations.FROM_4, ForwardMigrations.FROM_5).build() }
     val opportunityNotifier by lazy { OpportunityNotificationManager(this) }
     val analytics by lazy { AnalyticsRepository(database) { opportunityNotifier.send(it) } }
     val repository by lazy { WatchRepository(database, java.io.File(filesDir, "public-feeds")).apply { snapshotObserver = { i,q,p -> analytics.observe(i,q,p) } } }

@@ -45,6 +45,9 @@ fun localTime(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneId.s
 }
 @Composable fun MarketInstrumentCard(row:TrackedInstrument,vm:WatchViewModel,analysis:AnalysisResult?,onClick:()->Unit) {
     val points by remember(row.id) { vm.points(row.id,LocalChartRange.FIVE_DAYS) }.collectAsStateWithLifecycle(emptyList())
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val config by vm.engineConfig.collectAsStateWithLifecycle()
+    val configured=settings.providerUrl.isNotBlank() || config.urls().isNotEmpty()
     val observation by remember(row.id) { vm.latestObservation(row.id) }.collectAsStateWithLifecycle(null)
     val movement=observation?.changePercent?.toBigDecimalOrNull()
     Card(onClick=onClick,modifier=Modifier.fillMaxWidth()) {
@@ -54,6 +57,13 @@ fun localTime(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneId.s
                 Text(row.type,style=MaterialTheme.typography.labelSmall,color=MarketPalette.information())
             }
             Text(row.name,style=MaterialTheme.typography.bodySmall,maxLines=2)
+            val seriesLabel=when(row.kind) {
+                "NAV"->if(row.type=="ETF") "ETF NAV · not an exchange trade" else "Published fund NAV"
+                "LIVE","DELAYED"->"Exchange traded price · ${row.kind}"
+                "INDICATIVE"->"Indicative snapshot · unverified for analytics"
+                else->"No verified price series"
+            }
+            Text(seriesLabel,style=MaterialTheme.typography.labelSmall)
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
                 Text(row.value?.let { "$it ${row.currency}" } ?: "Awaiting quote",style=MaterialTheme.typography.titleLarge)
                 Text(movement?.let { "${if(it.signum()>0) "+" else ""}${it.display()}%" } ?: "Daily change —",
@@ -65,7 +75,8 @@ fun localTime(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneId.s
             Text("${a?.maturity?.replace('_',' ') ?: "INITIALIZING"} · ${a?.sessions ?: 0} sampled sessions",style=MaterialTheme.typography.labelSmall)
             Text(observation?.let { "${GatewayProvider.parseQuote(org.json.JSONObject(it.payload)).freshness(Instant.now())} · ${localTime(it.providerTime)}" } ?: row.timestamp?.let { "Saved observation · $it" } ?: "No observation collected",style=MaterialTheme.typography.labelSmall)
             Text("${row.quoteSource ?: "No source"} · analysis ${localTime(analysis?.analyzedAt)}",style=MaterialTheme.typography.labelSmall)
-            row.error?.let { Text(feedProblem(it,row.value!=null),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error) }
+            if(!configured) Text("Saved value · EGX setup required",style=MaterialTheme.typography.bodySmall)
+            if(configured) row.error?.let { Text(feedProblem(it,row.value!=null),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error) }
         }
     }
 }

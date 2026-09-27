@@ -10,6 +10,7 @@ class AdaptiveQuantitativeEngine {
     fun analyze(instrument:Instrument,q:Quote,sessions:List<Candle>,recent:List<LocalSample>,quality:SampleQuality,now:Instant,
         startedAt:Long?):StructuredAnalysis {
         val maturity=LocalIndicatorRequirements.maturity(quality)
+        if(q.qualityWarning!=null) return StructuredAnalysis("DISPUTED DATA",risks=listOf(q.qualityWarning),maturity=maturity.name,observations=quality.validSamples,sessions=quality.sessions,startedAt=startedAt)
         val discontinuity=sessions.any { !it.close.isFinite() || it.close<=0 } || recent.any { !it.price.isFinite() || it.price<=0 } ||
             sessions.zipWithNext().any { (a,b)->abs(b.close/a.close-1)>.5 } || recent.zipWithNext().any { (a,b)->abs(b.price/a.price-1)>.5 }
         if(discontinuity) return StructuredAnalysis("UNRELIABLE DATA",risks=listOf("Large price discontinuity or malformed sample; possible corporate action or bad tick. Verify the provider before interpreting this series."),maturity=maturity.name,building=LocalIndicatorRequirements.requirements.keys.toList(),observations=quality.validSamples,sessions=quality.sessions,completeness=quality.completeness,startedAt=startedAt)

@@ -79,8 +79,8 @@ private fun time(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneI
         val urls=(listOf(settings.providerUrl)+config.urls()).filter { it.isNotBlank() }.distinct()
         if(urls.isEmpty()) item { Section("Provider","Not configured. Offline identities and saved observations remain available.") }
         items(urls) { url ->
-            val h=health.firstOrNull { it.provider==url }
-            Section(if(url==urls.first()) "Primary provider" else "Fallback provider", "${android.net.Uri.parse(url).host}\n${h?.status ?: "Not checked"}\nLast success: ${time(h?.lastSuccess)}"+
+            val scoped=health.filter { it.provider.startsWith("$url|") };val h=scoped.maxByOrNull { it.lastSuccess ?: 0 }
+            Section(if(url==urls.first()) "Primary provider" else "Fallback provider", "${android.net.Uri.parse(url).host}\n${scoped.joinToString("\n") { it.provider.substringAfter('|')+": "+it.status }.ifEmpty { "Not checked" }}\nLast success: ${time(h?.lastSuccess)}"+
                 if((h?.retryAt ?: 0)>now.toEpochMilli()) "\nCooldown until ${time(h?.retryAt)}" else "")
         }
         item { Section("Analytics & alerts","Watchlist: ${instruments.map { it.id }.distinct().size} instruments\nQuantitative engine: ${analyses.count { it.analysis().status=="READY" }} assessments available\nOpportunity alerts: ${if(config.enabled) "Enabled" else "Paused"}\nAndroid notifications: ${if(NotificationManagerCompat.from(context).areNotificationsEnabled()) "Enabled" else "Blocked"}\nAI explanation: local, structured features only") }
@@ -94,8 +94,8 @@ private fun time(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneI
     var error by remember { mutableStateOf<String?>(null) }
     LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
         item { Text("Analytics & calendar",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold) }
-        item { Section("Data requirements","Use an authorized HTTPS gateway for quotes and completed daily history. No vendor keys belong in the app. Missing or stale history cannot produce an opportunity alert.") }
-        item { OutlinedTextField(draft.fallbackUrls,{draft=draft.copy(fallbackUrls=it)},Modifier.fillMaxWidth(),label={Text("Fallback HTTPS URLs · one per line, up to 2")}) }
+        item { Section("Data requirements","Use an authorized HTTPS gateway for current quotes. History grows from local observations. No vendor keys belong in the app. Missing or stale history cannot produce an opportunity alert.") }
+        item { OutlinedTextField(draft.fallbackUrls,{draft=draft.copy(fallbackUrls=it)},Modifier.fillMaxWidth(),label={Text("Fallback HTTPS URLs · priority order, up to 2")}) }
         item { Text("Local session exceptions",style=MaterialTheme.typography.titleLarge);Text("These override the configured weekly window. Holidays take priority. Keep this list current with exchange announcements.") }
         item { OutlinedTextField(draft.holidays,{draft=draft.copy(holidays=it)},Modifier.fillMaxWidth(),label={Text("Holiday dates · YYYY-MM-DD, comma separated")}) }
         item { OutlinedTextField(draft.exceptions,{draft=draft.copy(exceptions=it)},Modifier.fillMaxWidth(),label={Text("Exceptions · YYYY-MM-DD HH:mm-HH:mm per line")}) }

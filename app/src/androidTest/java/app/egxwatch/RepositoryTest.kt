@@ -22,7 +22,7 @@ class RepositoryTest {
     private lateinit var repo: WatchRepository
     private val instrument = DirectoryProvider.instruments.single { it.ticker == "CCAP" }
     private var value = "10.00"
-    private var time = Instant.parse("2026-01-01T10:00:00Z")
+    private var time = Instant.now().minusSeconds(1800)
     private var failure = false
     private var cached = false
     private var started: CompletableDeferred<Unit>? = null
@@ -110,6 +110,12 @@ class RepositoryTest {
         assertTrue(db.dao().history().first().isEmpty())
         assertEquals("10", db.dao().getInstruments().single().value)
         assertTrue(db.dao().getInstruments().single().error!!.contains("Saved feed"))
+    }
+    @Test fun staleObservationNeverCreatesEveryCheckAlerts() = runBlocking {
+        time = Instant.now().minusSeconds(86400)
+        repo.save(Settings(everyCheck = true))
+        check()
+        assertTrue(db.dao().history().first().isEmpty())
     }
     @Test fun dateOnlyNavCorrectionUpdatesLatestValue() = runBlocking {
         val fund = DirectoryProvider.instruments.single { it.ticker == "T70" }

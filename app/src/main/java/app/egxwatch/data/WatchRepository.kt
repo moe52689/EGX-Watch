@@ -2,6 +2,7 @@ package app.egxwatch.data
 
 import androidx.room.withTransaction
 import app.egxwatch.domain.*
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,6 +16,10 @@ import java.time.Instant
 class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: java.io.File? = null,
     private val providerFactory: ((Settings) -> MarketDataProvider)? = null) {
     val dao = database.dao()
+    val refreshing=kotlinx.coroutines.flow.MutableStateFlow(false)
+    val diagnostics=kotlinx.coroutines.flow.MutableStateFlow<List<ProviderDiagnostic>>(emptyList())
+    private suspend fun report(value:ProviderDiagnostic) { diagnostics.update { rows->rows.filterNot { it.instrumentId==value.instrumentId && it.provider==value.provider }+value } }
+
     private val mutex = Mutex()
     private val checkMutex = Mutex()
     @Volatile private var config=EngineConfig()
@@ -27,7 +32,7 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
         val urls=(listOf(settings.providerUrl)+config.urls()).filter { it.isNotBlank() }.distinct()
         val key=urls.joinToString("\n")
         if(key!=providerKey) {
-            configuredProvider=if(urls.isEmpty()) DirectoryProvider() else MarketDataRepository(urls.map { ProviderEndpoint(it,GatewayProvider(it)) },RoomHealthStore(database.engineDao()))
+            configuredProvider=if(urls.isEmpty()) DirectoryProvider() else MarketDataRepository(urls.map { ProviderEndpoint(it,GatewayProvider(it)) },RoomHealthStore(database.engineDao()),diagnostic=::report)
             providerKey=key
         }
         return configuredProvider
@@ -70,12 +75,24 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
         }
     }
     /** Serializes manual/background checks; records baseline and alert atomically. */
-    suspend fun check(background: Boolean, onlyIds: Set<String>? = null, deliver: suspend (Alert) -> String): Int = checkMutex.withLock {
+    suspend fun check(background: Boolean, onlyIds: Set<String>? = null, deliver: suspend (Alert) -> String): Int {
+        if(!checkMutex.tryLock()) return 0
+        refreshing.value=true
+        try { return performCheck(background,onlyIds,deliver) }
+        finally { refreshing.value=false;checkMutex.unlock() }
+    }
+    private suspend fun performCheck(background:Boolean,onlyIds:Set<String>?,deliver:suspend(Alert)->String):Int {
         val settings = dao.getSettings() ?: Settings()
         val policy = settings.policy()
         config=database.engineDao().config() ?: EngineConfig()
-        if (background && (!settings.enabled || !EgxSessionManager(settings,config,database.forwardDao().preferences()?.egxOffHours==true).isOpen(Instant.now()))) return@withLock 0
-        if(background && database.engineDao().status()?.lastAttempt?.let { Instant.now().toEpochMilli()-it < settings.interval*60000 }==true) return@withLock 0
+        if(providerFactory==null && settings.providerUrl.isBlank() && config.urls().isEmpty()) {
+            diagnostics.value=emptyList()
+            database.engineDao().let { d->d.status((d.status() ?: EngineStatus()).copy(message="SETUP REQUIRED · add an authorized EGX current-price gateway in Settings")) }
+            return 0
+        }
+        diagnostics.value=emptyList()
+        if (background && (!settings.enabled || !EgxSessionManager(settings,config,database.forwardDao().preferences()?.egxOffHours==true).isOpen(Instant.now()))) return 0
+        if(background && database.engineDao().status()?.lastAttempt?.let { Instant.now().toEpochMilli()-it < settings.interval*60000 }==true) return 0
         database.engineDao().let { d -> d.status((d.status() ?: EngineStatus()).copy(lastAttempt=Instant.now().toEpochMilli(),message="Checking configured sources")) }
         val provider = provider(settings)
         val count = java.util.concurrent.atomic.AtomicInteger()
@@ -88,7 +105,8 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
         dao.getInstruments().filter { onlyIds == null || it.id in onlyIds }.groupBy { it.id }.values.map { tracked -> async { slots.withPermit {
             val original = tracked.first()
             try {
-                val quote = provider.quote(original.instrument())
+                val savedTime=tracked.mapNotNull { it.timestamp?.let(Instant::parse) }.maxOrNull()
+                val quote = if(provider is MarketDataRepository) provider.quote(original.instrument(),savedTime) else provider.quote(original.instrument())
                 validateQuote(original.instrument(), quote)
                 val now = Instant.now().toString()
                 val pending = mutableListOf<Alert>()
@@ -108,7 +126,7 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
                         val previous = current.value?.takeIf { sameSeries }?.toBigDecimal()
                         val rule = policy.copy(absoluteThreshold = current.absoluteThreshold?.toBigDecimal() ?: policy.absoluteThreshold,
                             percentThreshold = current.percentThreshold?.toBigDecimal() ?: policy.percentThreshold)
-                        if (quote.notice == null && shouldNotify(quote.value, previous, rule)) {
+                        if (quote.notice == null && quote.qualityWarning==null && quote.freshness(Instant.now()) in setOf(Freshness.LIVE,Freshness.DELAYED) && shouldNotify(quote.value, previous, rule)) {
                             val change = previous?.let { change(quote.value, it) }
                             pending += Alert(instrumentId = row.id, ticker = row.ticker, name = row.name,
                                 current = quote.value.display(), previous = previous?.display(), absolute = change?.absolute?.display(),
@@ -118,7 +136,7 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
                         val advanced = oldTime == null || quote.timestamp > oldTime || current.value?.toBigDecimal()?.compareTo(quote.value) != 0
                         dao.update(current.copy(value = quote.value.display(), previous = if (!sameSeries || advanced) previous?.display() else current.previous,
                             kind = quote.kind.name, timestamp = quote.timestamp.toString(), quoteSource = quote.source,
-                            delayMinutes = quote.delayMinutes, lastCheck = now, error = quote.notice,
+                            delayMinutes = quote.delayMinutes, lastCheck = now, error = quote.qualityWarning ?: quote.notice,
                             timestampBasis = quote.timestampBasis.name, baselineKey = baselineKey))
                     }
                     pending.firstOrNull()?.let { event ->
@@ -148,9 +166,9 @@ class WatchRepository(private val database: WatchDatabase, feedCacheDirectory: j
             val previous=d.status() ?: EngineStatus()
             d.status(previous.copy(lastSuccess=if(count.get()>0) Instant.now().toEpochMilli() else previous.lastSuccess,
                 message="${count.get()} instruments checked; saved data retained on failure"))
-            d.pruneProviders((listOf(settings.providerUrl)+config.urls()).filter { it.isNotBlank() })
+            d.pruneProviders((listOf(settings.providerUrl)+config.urls()).filter { it.isNotBlank() }.flatMap { url-> listOf("directory","status") .plus(InstrumentType.entries.map { "quote:${it.name}" }).map { MarketDataRepository.healthKey(url,it) } })
         } }
-        count.get()
+        return count.get()
         } finally { if (provider is FreePublicProvider) provider.finishCheck() }
     }
 }

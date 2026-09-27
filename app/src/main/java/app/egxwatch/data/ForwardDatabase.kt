@@ -6,8 +6,9 @@ import kotlinx.coroutines.flow.Flow
 @Entity(tableName="gold_config")
 data class GoldConfig(@PrimaryKey val id:Int=1,val enabled:Boolean=false,val freeProvider:Boolean=true,
     val providerUrl:String="",val fallbackUrl:String="",val interval:Long=15,val days:String="1,2,3,4,5,6,7",
-    val start:String="00:00",val end:String="00:00",val zone:String="UTC",val holidays:String="") {
+    val start:String="00:00",val end:String="00:00",val zone:String="UTC",val holidays:String="",val providerOrder:String="primary,free,fallback") {
     fun validate() {
+        require(providerOrder.split(',').let { it.size==3 && it.toSet()==setOf("primary","free","fallback") }) { "Use primary,free,fallback in your preferred order" }
         require(interval in 15..525600);java.time.ZoneId.of(zone)
         require(days.split(',').map { java.time.DayOfWeek.of(it.toInt()) }.isNotEmpty())
         java.time.LocalTime.parse(start);java.time.LocalTime.parse(end)

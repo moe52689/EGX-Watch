@@ -1,3 +1,7 @@
+Current v1.4.1 verification: [device acceptance, tests and APK](DEVICE_ACCEPTANCE.md).
+
+The record below documents the preceding release.
+
 # Verification · EGX Watch 1.4.0 / build 5
 
 Executed locally on 2026-09-25 with JDK 17, Gradle 8.13, SDK/build-tools 35.

@@ -18,16 +18,16 @@ data class MarketFields(val open: BigDecimal? = null, val previousClose: BigDeci
 }
 enum class Freshness { LIVE, DELAYED, STALE, UNAVAILABLE }
 fun Quote.freshness(now: Instant, maxAgeMinutes: Long = 20): Freshness {
-    if (timestamp > now.plusSeconds(60) || value.signum() <= 0 || kind == DataKind.INDICATIVE) return Freshness.UNAVAILABLE
+    if (timestamp > now.plusSeconds(60) || value.signum() <= 0 || kind == DataKind.INDICATIVE || qualityWarning!=null) return Freshness.UNAVAILABLE
     if (notice != null) return Freshness.STALE
     val allowance = if (kind == DataKind.NAV) 4 * 24 * 60L else maxAgeMinutes + (delayMinutes ?: 0)
-    if (Duration.between(timestamp, now).toMinutes() > allowance) return Freshness.STALE
+    if (Duration.between(timestamp, now).seconds > minOf(allowance*60,maxAgeSeconds ?: Long.MAX_VALUE)) return Freshness.STALE
     return if (kind in setOf(DataKind.LIVE, DataKind.SPOT)) Freshness.LIVE else Freshness.DELAYED
 }
 fun Quote.fingerprint(): String {
     val parts = listOf(instrumentId, currency, kind.name, timestamp.toString(), source, timestampBasis.name,
         value.display(), delayMinutes?.toString(), fields.open?.display(), fields.previousClose?.display(),
-        fields.high?.display(), fields.low?.display(), fields.volume?.toString(), fields.bid?.display(), fields.ask?.display())
+        fields.high?.display(), fields.low?.display(), fields.volume?.toString(), fields.bid?.display(), fields.ask?.display()) + listOfNotNull(qualityWarning)
     return MessageDigest.getInstance("SHA-256").digest(parts.joinToString("\u0000").toByteArray()).joinToString("") { "%02x".format(it) }
 }
 

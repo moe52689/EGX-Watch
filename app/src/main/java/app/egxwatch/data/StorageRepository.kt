@@ -22,7 +22,7 @@ class StorageRepository(private val db:WatchDatabase) {
   db.withTransaction {
    MarketArchive.write(output,password) { encrypted ->
     val writer=encrypted.bufferedWriter(Charsets.UTF_8)
-    writer.appendLine(JSONObject().put("format","EGX logical market database").put("version",5).put("createdAt",java.time.Instant.now().toString()).toString())
+    writer.appendLine(JSONObject().put("format","EGX logical market database").put("version",6).put("createdAt",java.time.Instant.now().toString()).toString())
     val sqlite=db.openHelper.writableDatabase
     val tables=listOf("watchlists","instruments","settings","engine_config","market_observations","observed_sessions","collection_series","analyses","market_snapshots","alerts","opportunity_events","opportunity_state","provider_health","engine_status","gold_config","gold_status","gold_rules","gold_rule_state","alert_center","forward_preferences")
     tables.forEach { table ->

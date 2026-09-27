@@ -26,7 +26,7 @@ class GoldMarketProvider:MarketDataProvider {
                 override fun onFailure(call:Call,e:IOException) { if(continuation.isActive) continuation.resumeWith(Result.failure(IOException("Gold source unavailable"))) }
                 override fun onResponse(call:Call,response:Response) {
                     try { val value=response.use {
-                        if(!it.isSuccessful) throw ProviderHttpException(it.code,it.header("Retry-After")?.toLongOrNull())
+                        if(!it.isSuccessful) throw ProviderHttpException(it.code,retryAfterSeconds(it.header("Retry-After")))
                         val source=(it.body ?: throw IOException("Empty gold response")).source();source.request(65537)
                         require(source.buffer.size<=65536);source.buffer.readUtf8()
                     };if(continuation.isActive) continuation.resumeWith(Result.success(value))
@@ -40,7 +40,7 @@ class GoldMarketProvider:MarketDataProvider {
         fun parse(body:String):Quote {
             val j=JSONObject(body);require(j.getString("symbol")=="XAU" && j.getString("currency")=="USD")
             return Quote(GlobalGold.instrument.id,j.get("price").toString().toBigDecimal(),"USD",DataKind.SPOT,
-                Instant.parse(j.getString("updatedAt")),"Gold-API · global spot USD/oz",timestampBasis=TimestampBasis.PROVIDER_SNAPSHOT)
+                Instant.parse(j.getString("updatedAt")),"Gold-API · global spot USD/oz",timestampBasis=TimestampBasis.PROVIDER_SNAPSHOT,ticker=GlobalGold.instrument.ticker,instrumentType=InstrumentType.COMMODITY,maxAgeSeconds=1200)
         }
     }
 }

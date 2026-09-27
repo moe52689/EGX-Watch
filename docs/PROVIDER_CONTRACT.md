@@ -1,10 +1,10 @@
-# Current release: 1.4 forward collection
+# Current release: 1.4.1 provider acceptance
 
 The Android analytics pipeline requires current quotes only. It never calls the history route below. That route describes a legacy optional adapter, retained for compatibility/testing; no historical subscription or pre-installation history is needed.
 
 Gold gateways use instrument id `GLOBAL:XAUUSD`, ticker `XAU/USD`, type `COMMODITY`, currency `USD` and quote kind `SPOT` with `PROVIDER_SNAPSHOT` timestamp basis. Values are USD per troy ounce. Provide no API keys in URLs.
 
-# Authorized market-data gateway contract · 1.3
+# Authorized market-data gateway contract · 1.4.1
 
 No live API entitlement, vendor key or gateway is bundled. To activate this app you
 must supply an HTTPS base URL implementing the routes below and obtain upstream rights
@@ -51,9 +51,12 @@ Required fields:
 | Field | Type / meaning |
 |---|---|
 | instrumentId | Same canonical identity |
-| value | Verified decimal string; max 24 significant digits / 12 decimal places |
+| ticker | Exact validated instrument ticker |
+| type | Exact STOCK / ETF / FUND / COMMODITY type |
+| maxAgeSeconds | Required integer 1–345600; provider-declared maximum observation age |
+| value | Verified decimal string; positive, at most 1 trillion; max 24 significant digits / 12 decimal places |
 | currency | Must match the instrument |
-| kind | LIVE, DELAYED, NAV or INDICATIVE |
+| kind | LIVE, DELAYED, NAV, INDICATIVE or SPOT |
 | timestamp | Actual data ISO-8601 instant, never relabel a saved response as now |
 | source | Stable upstream provider/series label |
 | timestampBasis | EXCHANGE, VALUATION_DATE, PROVIDER_SNAPSHOT or RETRIEVAL_TIME |
@@ -71,7 +74,21 @@ The snapshot envelope stores ticker/name from the validated instrument, all supp
 fields and provider/data timestamp. Age/freshness and daily percentage change are derived
 on-device; daily change is unavailable without nonzero previousClose. Quote freshness is
 20 minutes plus declared exchange delay; NAV age allowance is four calendar days. This
-is a conservative local heuristic, not a verified fund publication schedule. Invalid or
+is a conservative local heuristic, not a verified fund publication schedule. The
+stricter of this limit and maxAgeSeconds applies. A gateway must provide ticker, type,
+maxAgeSeconds and timestampBasis explicitly; old cached JSON remains readable.
+Stale/indicative data and observations older than the saved timestamp are rejected
+inside each provider attempt so the next configured source can be tried. If none
+qualifies, the saved observation is retained with an unavailable status.
+
+Configured sources run in order with a bounded timeout per source. Eligible later
+sources also corroborate the first accepted value: same kind/basis, within five
+minutes (or the same Cairo valuation date for NAV). More than 3% disagreement marks
+the selected observation disputed and suppresses alerts. No prices are averaged.
+Missing routes do not create a provider-wide cooldown; network/429 cooldowns are
+persisted separately for directory, status and each quote asset type. Gold uses
+separate provider health keys. Diagnostics are visible for the current refresh;
+provider health persists across restarts. Invalid or
 unverified timing yields UNAVAILABLE; old or cached/error-marked data yields STALE.
 
 ## GET history/{id}

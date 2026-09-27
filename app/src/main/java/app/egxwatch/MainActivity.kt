@@ -86,7 +86,9 @@ fun WatchApp(openGold:Boolean=false, openHistory: Boolean = false, openAnalysisI
     val lists by vm.lists.collectAsStateWithLifecycle()
     val instruments by vm.instruments.collectAsStateWithLifecycle()
     val alerts by vm.alerts.collectAsStateWithLifecycle()
-    val busy by vm.busy.collectAsStateWithLifecycle()
+    val manualBusy by vm.busy.collectAsStateWithLifecycle()
+    val repositoryBusy by vm.repositoryRefreshing.collectAsStateWithLifecycle()
+    val busy=manualBusy || repositoryBusy
     val market by vm.market.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val online by vm.online.collectAsStateWithLifecycle()
@@ -140,6 +142,7 @@ fun WatchApp(openGold:Boolean=false, openHistory: Boolean = false, openAnalysisI
                         onRemove = { vm.remove(detail); detailId = null }, onSave = { a, p -> vm.thresholds(detail, a, p) })
                     tab == 0 -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         item { DashboardOverview(vm,rows.size) { showStatus=true } }
+                        item { EgxSetupAndDiagnostics(vm) { tab=4 } }
                         item { GoldSummary(vm) { tab=2 } }
                         item {
                             Text(when { busy -> "Refreshing your instruments…"; online == false -> "Offline · your saved values remain available";

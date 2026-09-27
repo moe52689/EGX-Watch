@@ -35,9 +35,11 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteGoldRule(rule:GoldRule)=run { app.database.forwardDao().delete(rule) }
     val goldConfig=app.database.forwardDao().goldConfigFlow().map { it ?: GoldConfig() }.stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),GoldConfig())
     val goldStatus=app.database.forwardDao().goldStatusFlow().map { it ?: GoldStatus() }.stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),GoldStatus())
-    val goldBusy=MutableStateFlow(false)
-    fun checkGold(background:Boolean=false)=run { if(goldBusy.value) return@run;goldBusy.value=true
-        try { app.goldRepository.check(background) } finally { goldBusy.value=false } }
+    val goldBusy=app.goldRepository.refreshing
+    val egxDiagnostics=repository.diagnostics
+    val goldDiagnostics=app.goldRepository.diagnostics
+    val repositoryRefreshing=repository.refreshing
+    fun checkGold(background:Boolean=false)=run { app.goldRepository.check(background) }
     fun saveGold(value:GoldConfig)=run { value.validate();app.database.forwardDao().save(value);GoldScheduler.apply(app,value);message.value="Gold monitoring saved" }
     val collections = app.database.observationDao().seriesFlow().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     fun latestObservation(id:String)=app.database.observationDao().latestFlow(id)
@@ -145,7 +147,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             val provider = repository.provider(Settings(providerUrl = url, freeFeeds = freeFeeds))
             connectionReport.value = when (provider) {
                 is FreePublicProvider -> provider.health()
-                is DirectoryProvider -> "Offline identity directory. Configure an authorized gateway for prices and history."
+                is DirectoryProvider -> "Offline identity directory. Configure an authorized current-price gateway. No historical subscription needed."
                 else -> {
                     val instrument = provider.resolve(provider.search("CCAP").first().id)
                     val quote = provider.quote(instrument)
@@ -165,7 +167,9 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val count = repository.check(false) { app.notifier.send(it) }
                 val total = repository.dao.getInstruments().map { it.id }.distinct().size
-                if (total > 0) message.value = "$count of $total checked successfully · saved values kept for unavailable sources"
+                val status=app.database.engineDao().status()?.message
+                if(status?.startsWith("SETUP REQUIRED")==true) message.value=status
+                else if(total>0) message.value="$count of $total accepted · open Refresh diagnostics for source results"
                 refreshMarket()
             } finally { busy.value = false }
         }

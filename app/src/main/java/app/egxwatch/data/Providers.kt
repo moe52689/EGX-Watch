@@ -87,7 +87,7 @@ class GatewayProvider(baseUrl: String) : HistoricalMarketDataProvider {
     override suspend fun resolve(id: String): Instrument = parseInstrument(get("instruments", id)).also {
         require(it.id == id) { "Provider returned a different instrument" }
     }
-    override suspend fun quote(instrument: Instrument) = parseQuote(get("quotes", instrument.id)).also { validateQuote(instrument, it) }
+    override suspend fun quote(instrument: Instrument) = parseVerifiedQuote(get("quotes", instrument.id), instrument)
     override suspend fun marketStatus(): MarketStatus {
         val json = get("market-status")
         val state = json.getString("state")
@@ -113,12 +113,22 @@ class GatewayProvider(baseUrl: String) : HistoricalMarketDataProvider {
             java.time.LocalDate.parse(result.verifiedAt)
             return result
         }
+        fun parseVerifiedQuote(json:JSONObject,instrument:Instrument,now:Instant=Instant.now()):Quote {
+            // Old locally saved JSON remains readable, but network responses must declare identity and age limits.
+            require(json.has("ticker") && json.has("type") && json.has("maxAgeSeconds") && json.has("timestampBasis")) { "Gateway contract requires ticker, type, maxAgeSeconds and timestampBasis" }
+            require(json.getString("ticker")==instrument.ticker && json.getString("type")==instrument.type.name) { "Gateway ticker/type mismatch" }
+            require(json.get("maxAgeSeconds").toString().toLong() in 1..345600)
+            return parseQuote(json).also { validateQuote(instrument,it,now) }
+        }
         fun parseQuote(json: JSONObject) = Quote(json.getString("instrumentId"), json.getString("value").toBigDecimal(),
             json.getString("currency"), DataKind.valueOf(json.getString("kind")), Instant.parse(json.getString("timestamp")),
             json.getString("source"), if (json.has("delayMinutes") && !json.isNull("delayMinutes")) json.getInt("delayMinutes") else null,
             TimestampBasis.valueOf(json.optString("timestampBasis", "EXCHANGE")), json.optString("notice").takeIf { it.isNotBlank() },
             MarketFields(decimal(json,"open"),decimal(json,"previousClose"),decimal(json,"high"),decimal(json,"low"),
-                if(json.has("volume") && !json.isNull("volume")) json.getLong("volume") else null,decimal(json,"bid"),decimal(json,"ask")))
+                if(json.has("volume") && !json.isNull("volume")) json.get("volume").toString().toLong() else null,decimal(json,"bid"),decimal(json,"ask")),
+            json.optString("ticker").takeIf { it.isNotBlank() },json.optString("type").takeIf { it.isNotBlank() }?.let(InstrumentType::valueOf),
+            if(json.has("maxAgeSeconds") && !json.isNull("maxAgeSeconds")) json.getLong("maxAgeSeconds") else null,
+            json.optString("qualityWarning").takeIf { it.isNotBlank() })
         private fun decimal(json:JSONObject,key:String)=if(json.has(key) && !json.isNull(key)) json.getString(key).toBigDecimal() else null
 }
 }

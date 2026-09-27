@@ -11,7 +11,8 @@ data class Instrument(val id: String, val ticker: String, val name: String, val 
     val currency: String = "EGP", val source: String, val verifiedAt: String)
 data class Quote(val instrumentId: String, val value: BigDecimal, val currency: String,
     val kind: DataKind, val timestamp: Instant, val source: String, val delayMinutes: Int? = null,
-    val timestampBasis: TimestampBasis = TimestampBasis.EXCHANGE, val notice: String? = null, val fields: MarketFields = MarketFields())
+    val timestampBasis: TimestampBasis = TimestampBasis.EXCHANGE, val notice: String? = null, val fields: MarketFields = MarketFields(),
+    val ticker: String? = null, val instrumentType: InstrumentType? = null, val maxAgeSeconds: Long? = null, val qualityWarning: String? = null)
 data class MarketStatus(val state: String, val detail: String, val timestamp: Instant?)
 
 interface MarketDataProvider {
@@ -64,8 +65,17 @@ fun validateQuote(instrument: Instrument, quote: Quote, now: Instant = Instant.n
     require(quote.value.signum() >= 0 && quote.value.precision() <= 24 && quote.value.scale() in 0..12) { "Invalid value" }
     require(quote.timestamp <= now.plusSeconds(300)) { "Quote timestamp is in the future" }
     require(quote.source.isNotBlank()) { "Missing data source" }
-    require(if (instrument.type == InstrumentType.STOCK) quote.kind != DataKind.NAV else
-        instrument.type in setOf(InstrumentType.ETF, InstrumentType.COMMODITY) || quote.kind == DataKind.NAV) { "Incorrect quote/NAV classification" }
+    val allowed = when(instrument.type) {
+        InstrumentType.STOCK -> setOf(DataKind.LIVE,DataKind.DELAYED,DataKind.INDICATIVE)
+        InstrumentType.ETF -> setOf(DataKind.LIVE,DataKind.DELAYED,DataKind.INDICATIVE,DataKind.NAV)
+        InstrumentType.FUND -> setOf(DataKind.NAV)
+        InstrumentType.COMMODITY -> setOf(DataKind.SPOT)
+    }
+    require(quote.kind in allowed) { "Incorrect instrument/quote classification" }
+    require(quote.ticker==null || quote.ticker==instrument.ticker) { "Ticker mismatch" }
+    require(quote.instrumentType==null || quote.instrumentType==instrument.type) { "Instrument type mismatch" }
+    require(quote.maxAgeSeconds==null || quote.maxAgeSeconds in 1..345600) { "Invalid declared freshness allowance" }
+    require(quote.value <= BigDecimal("1000000000000")) { "Price outside supported numeric range" }
     require(quote.kind != DataKind.DELAYED || (quote.delayMinutes != null && quote.delayMinutes in 0..1440)) { "Missing or invalid delay" }
     require(quote.kind != DataKind.NAV || quote.timestampBasis in setOf(TimestampBasis.VALUATION_DATE, TimestampBasis.EXCHANGE)) { "NAV requires a valuation timestamp" }
     require(quote.kind != DataKind.INDICATIVE || quote.timestampBasis in setOf(TimestampBasis.PROVIDER_SNAPSHOT, TimestampBasis.RETRIEVAL_TIME))

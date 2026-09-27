@@ -39,7 +39,7 @@ class FailoverTest {
         var clock=now;val health=MemoryHealth();val p=MockMarketDataProvider(q,ProviderHttpException(429,7200))
         fun repo()=MarketDataRepository(listOf(ProviderEndpoint("a",p)),health,{clock},{0.0})
         try { repo().quote(i) } catch(_:IOException) {}
-        assertEquals(now.plusSeconds(7200).toEpochMilli(),health.rows["a"]!!.retryAt)
+        assertEquals(now.plusSeconds(7200).toEpochMilli(),health.rows[MarketDataRepository.healthKey("a","quote:STOCK")]!!.retryAt)
         try { repo().quote(i) } catch(_:IOException) {}
         assertEquals(1,p.calls)
         clock=now.plusSeconds(7201);p.failure=null;p.result=q.copy(timestamp=clock)
@@ -48,7 +48,7 @@ class FailoverTest {
     @Test fun staleFallbackKeepsOriginalTimestampAndSuppressesAlerts()=runTest {
         val stale=q.copy(timestamp=now.minusSeconds(7200))
         val repo=MarketDataRepository(listOf(ProviderEndpoint("a",MockMarketDataProvider(stale))),MemoryHealth(),{now},{0.0})
-        val result=repo.quote(i);assertEquals(stale.timestamp,result.timestamp);assertNotNull(result.notice)
+        try { repo.quote(i);fail("Stale results must be rejected") } catch(_:NoAcceptedQuote) { }
     }
     @Test fun providerErrorsDoNotLeakCredentialsInHealth()=runTest {
         val health=MemoryHealth();val repo=MarketDataRepository(listOf(ProviderEndpoint("a",MockMarketDataProvider(q,IOException("secret-token")))),health,{now},{0.0})
