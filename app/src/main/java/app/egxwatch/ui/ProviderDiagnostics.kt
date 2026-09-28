@@ -13,10 +13,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     val status by vm.engineStatus.collectAsStateWithLifecycle()
     if(settings.providerUrl.isBlank() && config.urls().isEmpty()) {
         OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("EGX · setup required",style=MaterialTheme.typography.titleMedium)
-            Text("Your watchlist and saved observations are safe. No authorized current-price source is configured. Refresh cannot retrieve EGX quotes until a compatible gateway is added.",style=MaterialTheme.typography.bodySmall)
+            Text("EGX data unavailable",style=MaterialTheme.typography.titleMedium)
+            Text("You can add stocks, ETFs and funds without configuration. This build has no verified automatic EGX price or fund NAV source. Adding an instrument does not activate a feed. Saved observations keep their original dates.",style=MaterialTheme.typography.bodySmall)
             Text("Gold Watch has its own connection. No purchased historical data is needed.",style=MaterialTheme.typography.bodySmall)
-            TextButton(onClick=onSetup) { Text("Configure EGX gateway") }
+            TextButton(onClick=onSetup) { Text("Advanced · custom gateway") }
         } }
     } else {
         Text(status.message,style=MaterialTheme.typography.bodySmall)

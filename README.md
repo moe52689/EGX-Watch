@@ -1,4 +1,4 @@
-# EGX Watch 1.4.2 · build 7
+# EGX Watch 1.4.3 · build 8
 
 An Android 8+ Kotlin/Compose Material 3 application with Room, Coroutines/Flow and
 WorkManager. This release extends the existing app. New watchlists are empty;
@@ -6,14 +6,14 @@ upgrades preserve selections and last saved quotes/NAVs.
 
 ## Install the versioned APK
 
-Use `artifacts/EGX-Watch-v1.4.2-build7-2026-09-27-debug.apk` (or the identical
+Use `artifacts/EGX-Watch-v1.4.3-build8-2026-09-28-debug.apk` (or the identical
 `artifacts/EGX-Watch-debug.apk`). Copy it to the phone and open it from your file
 manager. Allow installation from that source if Android asks. Install over the
 previous locally signed version to preserve its database. This is a debuggable,
 development-signed APK, not a Play release.
 
 ```sh
-adb install -r artifacts/EGX-Watch-v1.4.2-build7-2026-09-27-debug.apk
+adb install -r artifacts/EGX-Watch-v1.4.3-build8-2026-09-28-debug.apk
 adb shell am start -n app.egxwatch/.MainActivity
 ```
 
@@ -66,6 +66,12 @@ See the [source matrix](docs/SOURCE_MATRIX_2026-09-27.md) and
    market archive, or confirm deletion of one instrument's/all collected history.
 
 ## Data providers and free-feed limits
+
+**Automatic EGX values remain unavailable in this build.** Stocks, ETFs and funds
+can be added without setup, but none of the reviewed sources passed both data and
+usage-rights checks. Version 1.4.3 makes that gap explicit and distinguishes saved
+quotes from current data. See [documented API probes and coverage gaps](docs/AUTOMATIC_FEED_REVIEW_2026-09-28.md),
+including EGID and open-source projects. Browser links do not fulfill in-app pricing.
 
 The [Twelve Data, Alpha Vantage and Finnhub review](docs/EGX_PROVIDER_REVIEW_2026-09-27.md)
 records coverage, timestamp, quota and licensing blockers. None is enabled as an EGX

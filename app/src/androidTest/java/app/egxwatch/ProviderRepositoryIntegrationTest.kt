@@ -14,6 +14,28 @@ import java.time.Instant
 @RunWith(AndroidJUnit4::class)
 class ProviderRepositoryIntegrationTest {
     private fun database()=Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(),WatchDatabase::class.java).build()
+    @Test fun freshInstallAllowsMixedWatchlistWithoutCredentialsAndRestartPreservesIt()=runBlocking {
+        val context=ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name="test-default-coverage-${java.util.UUID.randomUUID()}.db"
+        var db=Room.databaseBuilder(context,WatchDatabase::class.java,name).build()
+        try {
+            var repo=WatchRepository(db);repo.initialize()
+            assertTrue(repo.dao.getInstruments().isEmpty())
+            assertTrue(repo.dao.getSettings()!!.providerUrl.isEmpty())
+            val tickers=setOf("COMI","ETEL","CCAP","EGX30ETF","AZG","T70")
+            val instruments=DirectoryProvider.instruments.filter { it.ticker in tickers }
+            assertEquals(tickers,instruments.map { it.ticker }.toSet())
+            instruments.forEach { repo.add(repo.dao.getLists().single().id,it) }
+            assertEquals(0,repo.check(false){error("No feed must not notify")})
+            val saved=repo.dao.getInstruments()
+            assertTrue(saved.all { it.value==null && it.timestamp==null })
+            db.close()
+            db=Room.databaseBuilder(context,WatchDatabase::class.java,name).build()
+            repo=WatchRepository(db);repo.initialize()
+            assertEquals(saved.toSet(),repo.dao.getInstruments().toSet())
+            assertEquals(0,repo.check(true){error("No feed must not notify")})
+        } finally { db.close();context.deleteDatabase(name) }
+    }
     @Test fun missingEgxConfigurationDoesNotOverwriteSavedValuesOrAttemptQuotes()=runBlocking {
         val db=database()
         try {

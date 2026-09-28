@@ -109,7 +109,9 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun add(list: Long, instrument: Instrument) = run {
         repository.add(list, instrument)
-        message.value = "${instrument.ticker} added · fetching latest published value"
+        val settings=repository.dao.getSettings() ?: Settings()
+        val configured=settings.providerUrl.isNotBlank() || (app.database.engineDao().config() ?: EngineConfig()).urls().isNotEmpty()
+        message.value = if(configured) "${instrument.ticker} added · checking configured sources" else missingFeedMessage(instrument.ticker,instrument.type==InstrumentType.FUND)
         refreshingIds.value += instrument.id
         try { repository.check(false, setOf(instrument.id)) { app.notifier.send(it) } }
         finally { refreshingIds.value -= instrument.id }

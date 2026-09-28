@@ -50,6 +50,20 @@ class FailoverTest {
         val repo=MarketDataRepository(listOf(ProviderEndpoint("a",MockMarketDataProvider(stale))),MemoryHealth(),{now},{0.0})
         try { repo.quote(i);fail("Stale results must be rejected") } catch(_:NoAcceptedQuote) { }
     }
+    @Test fun networkRecoveryWaitsForCooldownThenAcceptsANewTimestamp()=runTest {
+        var clock=now
+        val health=MemoryHealth()
+        val p=MockMarketDataProvider(q,IOException("offline"))
+        val repo=MarketDataRepository(listOf(ProviderEndpoint("a",p)),health,{clock},{0.0})
+        try { repo.quote(i);fail("Offline source must not supply a value") } catch(_:NoAcceptedQuote) {}
+        p.failure=null
+        try { repo.quote(i);fail("Reconnect must not bypass cooldown") } catch(_:NoAcceptedQuote) {}
+        assertEquals(1,p.calls)
+        clock=Instant.ofEpochMilli(health.rows[MarketDataRepository.healthKey("a","quote:STOCK")]!!.retryAt+1)
+        p.result=q.copy(timestamp=clock)
+        assertEquals(clock,repo.quote(i).timestamp)
+        assertEquals(2,p.calls)
+    }
     @Test fun providerErrorsDoNotLeakCredentialsInHealth()=runTest {
         val health=MemoryHealth();val repo=MarketDataRepository(listOf(ProviderEndpoint("a",MockMarketDataProvider(q,IOException("secret-token")))),health,{now},{0.0})
         try { repo.quote(i) } catch(_:IOException) {}

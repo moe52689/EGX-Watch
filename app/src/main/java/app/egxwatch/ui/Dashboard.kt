@@ -32,7 +32,7 @@ fun localTime(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneId.s
             Text("MARKET MONITOR",style=MaterialTheme.typography.labelMedium,color=MarketPalette.information())
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
                 Text("EGX monitoring",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
-                Text(if(!settings.enabled) "PAUSED" else if(config.calendar(settings).isOpen(Instant.now())) "ACTIVE" else "SESSION CLOSED",style=MaterialTheme.typography.labelMedium)
+                Text(egxMonitoringLabel(settings.enabled,settings.providerUrl.isNotBlank() || config.urls().isNotEmpty(),config.calendar(settings).isOpen(Instant.now())),style=MaterialTheme.typography.labelMedium)
             }
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
                 Column { Text("$count",style=MaterialTheme.typography.headlineSmall);Text("instruments",style=MaterialTheme.typography.labelSmall) }
@@ -49,6 +49,9 @@ fun localTime(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneId.s
     val config by vm.engineConfig.collectAsStateWithLifecycle()
     val configured=settings.providerUrl.isNotBlank() || config.urls().isNotEmpty()
     val observation by remember(row.id) { vm.latestObservation(row.id) }.collectAsStateWithLifecycle(null)
+    var now by remember { mutableStateOf(Instant.now()) }
+    LaunchedEffect(row.id) { while(true) { now=Instant.now();kotlinx.coroutines.delay(60_000) } }
+    val quote=observation?.let { runCatching { GatewayProvider.parseQuote(org.json.JSONObject(it.payload)) }.getOrNull() }
     val movement=observation?.changePercent?.toBigDecimalOrNull()
     Card(onClick=onClick,modifier=Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
@@ -59,13 +62,13 @@ fun localTime(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneId.s
             Text(row.name,style=MaterialTheme.typography.bodySmall,maxLines=2)
             val seriesLabel=when(row.kind) {
                 "NAV"->if(row.type=="ETF") "ETF NAV · not an exchange trade" else "Published fund NAV"
-                "LIVE","DELAYED"->"Exchange traded price · ${row.kind}"
+                "LIVE","DELAYED"->"Saved exchange traded price"
                 "INDICATIVE"->"Indicative snapshot · unverified for analytics"
                 else->"No verified price series"
             }
             Text(seriesLabel,style=MaterialTheme.typography.labelSmall)
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-                Text(row.value?.let { "$it ${row.currency}" } ?: "Awaiting quote",style=MaterialTheme.typography.titleLarge)
+                Text(row.value?.let { "$it ${row.currency}" } ?: "Unavailable · ${row.currency}",style=MaterialTheme.typography.titleLarge)
                 Text(movement?.let { "${if(it.signum()>0) "+" else ""}${it.display()}%" } ?: "Daily change —",
                     color=if(movement==null || movement.signum()==0) MaterialTheme.colorScheme.onSurfaceVariant else if(movement.signum()<0) MarketPalette.negative() else MarketPalette.positive(),style=MaterialTheme.typography.labelLarge)
             }
@@ -73,9 +76,13 @@ fun localTime(value:Long?)=value?.let { Instant.ofEpochMilli(it).atZone(ZoneId.s
             val a=analysis?.analysis()
             Text(a?.score?.let { "Opportunity $it/100 · ${(a.confidence*100).toInt()}% data confidence" } ?: "Building history",color=MarketPalette.analytics(),style=MaterialTheme.typography.labelLarge)
             Text("${a?.maturity?.replace('_',' ') ?: "INITIALIZING"} · ${a?.sessions ?: 0} sampled sessions",style=MaterialTheme.typography.labelSmall)
-            Text(observation?.let { "${GatewayProvider.parseQuote(org.json.JSONObject(it.payload)).freshness(Instant.now())} · ${localTime(it.providerTime)}" } ?: row.timestamp?.let { "Saved observation · $it" } ?: "No observation collected",style=MaterialTheme.typography.labelSmall)
+            Text(observationLabel(quote,configured,row.value!=null,now),style=MaterialTheme.typography.labelSmall)
+            Text(quote?.let {
+                if(it.timestampBasis==TimestampBasis.VALUATION_DATE) "NAV valuation date: ${it.timestamp.atZone(ZoneId.of("Africa/Cairo")).toLocalDate()} · publication time not supplied"
+                else "Source timestamp: ${it.timestamp}"
+            } ?: row.timestamp?.let { "Saved source timestamp: $it" } ?: "Source timestamp unavailable",style=MaterialTheme.typography.labelSmall)
             Text("${row.quoteSource ?: "No source"} · analysis ${localTime(analysis?.analyzedAt)}",style=MaterialTheme.typography.labelSmall)
-            if(!configured) Text("Saved value · EGX setup required",style=MaterialTheme.typography.bodySmall)
+            if(!configured) Text(missingFeedMessage(row.ticker,row.type=="FUND"),style=MaterialTheme.typography.bodySmall)
             if(configured) row.error?.let { Text(feedProblem(it,row.value!=null),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error) }
         }
     }
